@@ -17,15 +17,15 @@
 
 # check connection to OCP4 cluster
 - name: check connection to api.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} oc version"
+  shell: "ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} ls"
   register: outmsg_api
   ignore_errors: true
 - name: check connection to oauth-openshift.apps.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@oauth-openshift.apps.{{ ocp_cluster_domain }} oc version"
+  shell: "ssh -o StrictHostKeyChecking=no root@oauth-openshift.apps.{{ ocp_cluster_domain }} ls"
   register: outmsg_oauth
   ignore_errors: true
 - name: check connection to default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} oc version"
+  shell: "ssh -o StrictHostKeyChecking=no root@default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} ls"
   register: outmsg_route
   ignore_errors: true
 - name: Failed check connection to OCP4 cluster
