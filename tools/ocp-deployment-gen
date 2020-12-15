@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Generate OpenShift deployment YAML file """
+
+# Global modules
+
+import sys
+
+# Local modules
+
+from modules.args     import (
+    getCommonArgsParser,
+    addArgOutputFile,
+    addArgOverlayUuid
+)
+from modules.config   import getConfig
+from modules.logger   import setupLogging
+from modules.nfsTools import getOverlayBase
+from modules.tools    import genFileFromTemplate
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Generate OpenShift deployment YAML file'
+    )
+
+    addArgOverlayUuid(parser)
+    addArgOutputFile(parser, None)
+
+    return parser.parse_args()
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+
+    args = _getArgs()
+
+    setupLogging(args)
+
+    config = getConfig(args.config_file, True)
+
+    params = {
+        # The OCP project name
+        'PROJECT': config.ocp.project,
+
+        # OCP deployment name
+        'DEPLOYMENT_NAME': config.flavor.nws4.imageNames.short,
+
+        # Last part of the init image repository name
+        'INIT_IMAGE_NAME_SHORT': config.flavor.init.imageNames.short,
+
+        # Last part of the NWS4 image repository name
+        'NWS4_IMAGE_NAME_SHORT': config.flavor.nws4.imageNames.short,
+
+        # Last part of the HDB image repository name
+        'HDB_IMAGE_NAME_SHORT': config.flavor.hdb.imageNames.short,
+
+        # Name of the ASCS container
+        'NWS4_ASCS_CONTAINER_NAME': config.flavor.nws4.ascs.containerName,
+
+        # Name of the DI container
+        'NWS4_DI_CONTAINER_NAME': config.flavor.nws4.di.containerName,
+
+        # Name of the HDB container
+        'HDB_CONTAINER_NAME': config.flavor.hdb.containerName,
+
+        # Name of the service account
+        'SERVICE_ACCOUNT_NAME': config.ocp.serviceAccountName,
+
+        # --- Parameters for NWS4 Image ---
+
+        # SAPSID of the Netweaver S/4 SAP System
+        'NWS4_SAPSID': config.flavor.nws4.sid.upper(),
+
+        # Host name of the original Netweaver S/4 SAP System
+        'NWS4_PQHN': config.flavor.nws4.host,
+
+        # Domain name of the original Netweaver S/4 SAP System
+        'NWS4_FQHN': config.flavor.nws4.sapfqdn,
+
+        # -- Parameters for ASCS Instance ---
+
+        # Instance number of the Netweaver S/4 SAP System ASCS Instance
+        'NWS4_ASCS_INSTNO': config.flavor.nws4.ascs.instNo,
+        # Profile name of ASCS Instance, optional. If empty, default is used
+        'NWS4_ASCS_PROFILE': config.flavor.nws4.ascs.profileName,
+
+        # -- Parameters for DI Instance --
+
+        # Instance number of the Netweaver S/4 SAP System Dialog Instance
+        'NWS4_DI_INSTNO': config.flavor.nws4.di.instNo,
+
+        # Profile name of DI Instance, optional. If empty, default is used
+        'NWS4_DI_PROFILE': config.flavor.nws4.di.profileName,
+
+        # --- Parameters for HDB Image ---
+
+        # SAPSID of the HANA DB System
+        'HDB_SAPSID': config.flavor.hdb.sid.upper(),
+
+        # Instance number of the HANA DB System
+        'HDB_INSTNO': config.flavor.hdb.instNo,
+
+        # Host name of the original HANA DB System
+        'HDB_PQHN': config.flavor.hdb.host,
+
+        # Directory under which directories {data,log} of the HANA DB system are located
+        'HDB_BASE': config.flavor.hdb.base,
+
+        # -- Parameters for mounting HANA DB database file systems --
+
+        # IP address of the NFS server
+        'NFS_INTRANET_IP': config.nfs.ip,
+
+        # Parent dir on NFS Server
+        'NFS_PARENT_DIR': getOverlayBase(config, args.overlay_uuid),
+    }
+
+    outputFile = args.output_file
+    if not outputFile:
+        outputFile = config.ocp.deploymentFileName
+
+    genFileFromTemplate(f'{config.repo.root}/openshift/deployment.yaml.template',
+                        outputFile, params)
+
+    print(outputFile)
+
+    # ----------------------------------------------------------------------
+
+
+if __name__ == "__main__":
+    _main()
+    sys.exit(0)

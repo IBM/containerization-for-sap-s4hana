@@ -1,0 +1,41 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+repo:
+  root: {{path_to_ocp_tool}} # Path to the root directory of the clone of this repository on the build / deploy host
+    
+build:
+  tmp-root: {{tmp_root}} # Directory under which the build contexts for image build are assembled
+
+ocp:
+  domain:   {{ocp_cluster_domain}}   # Domain name of the Red Hat OpenShift Container Platform (OCP) cluster - used for "oc" operations
+  user:     {{oc_user}}     # User in OCP cluster which is used for "oc" operations
+  password: {{oc_psw}} # Password of ocp.user in OCP cluster
+  project:  {{oc_project_name}}  # Project of ocp.user in OCP cluster under which the generated images are stored and the containers are started
+
+flavor:
+  init:            # No parameters for flavor 'init'
+  nws4:
+    sid:    {{nws4_sid}}  # SAP system ID of the original SAP NetWeaver / SAP S/4HANA system
+    host:   {{host_nws4}} # Host on which the original SAP NetWeaver / SAP S/4HANA system is installed
+    user:   {{host_user_nws4}} # User on flavor.nws4.host which is used for ssh and rsync operations (needs root permissions)
+  hdb:             # No parameters for flavor 'hdb'
+
+nfs:
+  host:        {{nfs_host}}         # Host on which the NFS server is running
+  user:        {{nfs_user}}         # User on nfs.host which is used for ssh and rsync operations (needs root permissions)
+  copyBase:    {{path_to_hdb_copy}}    # Path on nfs.host where directories {data,log} of the original HANA system are copied to
+  overlayBase: {{path_to_overlay}} # Path on nfs.host under which overlay file systems for container instances are created

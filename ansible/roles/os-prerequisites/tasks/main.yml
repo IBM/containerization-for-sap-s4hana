@@ -1,0 +1,100 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+# check connection to OCP4 cluster
+- name: check connection to api.{{ ocp_cluster_domain }} hostname
+  shell: "ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} oc version"
+  register: outmsg_api
+  ignore_errors: true
+- name: check connection to oauth-openshift.apps.{{ ocp_cluster_domain }} hostname
+  shell: "ssh -o StrictHostKeyChecking=no root@oauth-openshift.apps.{{ ocp_cluster_domain }} oc version"
+  register: outmsg_oauth
+  ignore_errors: true
+- name: check connection to default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} hostname
+  shell: "ssh -o StrictHostKeyChecking=no root@default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} oc version"
+  register: outmsg_route
+  ignore_errors: true
+- name: Failed check connection to OCP4 cluster
+  fail:
+    msg: "Insert the `<ocp4-helper-node-ip> api.<ocp-cluster-domain> oauth-openshift.apps.<ocp-cluster-domain> default-route-openshift-image-registry.apps.<ocp-cluster-domain>` into the /etc/hosts file on your build LPAR. Check that password-less access is possible for user root to these hosts."
+  when: outmsg_api.rc != 0 or outmsg_oauth.rc != 0 or outmsg_route.rc != 0
+
+# check if oc tool is installed and copy it from helper node if not installed
+- name: verify local oc tool
+  command: which oc
+  ignore_errors: true
+  register: outmsg
+- name: verify oc tool on OCP4 helper node
+  command: ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} "which oc"
+  register: outmsg_helper
+  ignore_errors: true
+  when: outmsg.rc !=0
+- name: copy oc tool from OCP4 helper node to build LPAR
+  command: scp -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }}:{{ outmsg_helper.stdout }} {{ outmsg_helper.stdout }}
+  register: outmsg_scp
+  when: outmsg.rc != 0 and outmsg_helper is defined and outmsg_helper.rc == 0
+- name: check if oc tool is installed
+  debug: msg="{{ outmsg_scp.stderr }}"
+  failed_when: outmsg_scp.rc != 0
+  when: outmsg_scp.stderr is defined and outmsg_scp.rc != 0
+
+# check temp directory for image builds
+- name: create temp directory for image builds
+  file:
+    path: "{{ tmp_root }}"
+    state: directory
+
+# check NFS server connections
+- name: check ssh connection to NFS server {{ nfs_user }}@{{ nfs_host }}
+  shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} ls"
+- name: check ssh connection from NFS server to SAP reference system LPAR {{ host_user_nws4 }}@{{ host_nws4 }}
+  shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} 'ssh -o StrictHostKeyChecking=no {{ host_user_nws4 }}@{{ host_nws4 }} cat /usr/sap/sapservices'"
+  register: outmsg_ssh
+- name: show /usr/sap/sapservices file content
+  debug: var=outmsg_ssh.stdout_lines
+
+# check NFS directories on NFS server
+- name: create NFS hdb directory on NFS server
+  command: ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} "mkdir -p {{ path_to_hdb_copy }}"
+- name: create NFS overlay directory on NFS server
+  command: ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} "mkdir -p {{ path_to_overlay }}"
+
+# install all required libraries
+- name: install podman
+  package:
+    name: podman
+    state: "{{ package_state }}"
+- name: install a "{{ package_state }}" version of git
+  package:
+    name: git
+    state: "{{ package_state }}"
+- name: install python3
+  package:
+    name: python3
+    state: "{{ package_state }}"  
+- name: install python3-devel
+  package:
+    name: python3-devel
+    state: "{{ package_state }}"
+- import_tasks: ../../../tasks/rhel8.x-prerequisites.yml
+- name: install paramiko
+  pip: name=paramiko state="{{ package_state}}"
+
+# generate config.yml and verify its parameters
+- import_tasks: gen-verify-config.yml
+
+#- import_tasks: prepare-subtrees.yml

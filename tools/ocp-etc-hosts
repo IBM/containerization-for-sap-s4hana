@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Add OpenShift cluster domain entries to '/etc/hosts' """
+
+# Global modules
+
+import shutil
+import socket
+import sys
+
+# Local modules
+
+from modules.args    import getCommonArgsParser
+from modules.config  import getConfig
+from modules.logger  import setupLogging
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        "Add OpenShift cluster domain entries to '/etc/hosts'"
+    )
+
+    # pylint: disable=bad-whitespace
+
+    parser.add_argument(
+        '--helper-hostname',
+        metavar  = '<helper-hostname>',
+        required = True,
+        help     = 'Hostname of helper node as seen in the Intranet'
+    )
+
+    return parser.parse_args()
+
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+    """ Main function """
+
+    args = _getArgs()
+
+    setupLogging(args)
+
+    ocpDomain = getConfig(args.config_file, False).ocp.domain
+    helperIp = socket.gethostbyname(args.helper_hostname)
+
+    fqdns = (
+        f'api.{ocpDomain}',
+        f'oauth-openshift.apps.{ocpDomain}',
+        f'default-route-openshift-image-registry.apps.{ocpDomain}',
+        f'console-openshift-console.apps.{ocpDomain}'
+    )
+
+    etcHosts = '/etc/hosts'
+    hostEntry = f'{helperIp}\t'+' '.join(fqdns)
+
+    found = []
+    with(open(etcHosts, 'r')) as fh:  # pylint: disable=invalid-name
+        for line in fh.readlines():
+            if line.strip().startswith('#'):
+                continue
+            if ocpDomain in line:
+                found.append(line)
+
+    if found:
+        print(f"\nThe following line(s) in '{etcHosts}' already"
+              f" contain(s) entries for domain '{ocpDomain}':\n")
+        for line in found:
+            print(f"{line}")
+        print(f"Please check whether the following FQDN's are active and add all missing FQDN's:\n")
+        for fqdn in fqdns:
+            print(f"   '{fqdn}'")
+        print()
+    else:
+        backup = f'{etcHosts}.orig'
+        shutil.copy2(etcHosts, backup)
+        with open(etcHosts, 'a') as fh:  # pylint: disable=invalid-name
+            print(f'\n# Added by ocp-etc-hosts:\n{hostEntry}', file=fh)
+        print(f"\nAdded the following line to file '{etcHosts}'\n\n{hostEntry}\n")
+        print(f"Stored backup of original '{etcHosts}' in '{backup}'\n")
+
+
+# ----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+    _main()
+    sys.exit(0)

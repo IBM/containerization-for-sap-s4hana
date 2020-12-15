@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Verify settings in configuration YAML file """
+
+# Global modules
+
+import sys
+
+# Local modules
+
+from modules.args   import getCommonArgs
+from modules.config import getConfig
+from modules.logger import setupLogging
+from modules.verify import (
+    verifyOcp,
+    verifyNfs,
+    verifyNws4,
+    verifyHdb,
+    verifySAPSystem,
+    verifySshConnection
+)
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+
+    args = getCommonArgs()
+
+    setupLogging(args)
+
+    config = getConfig(args.config_file, True)
+
+    print(f"Verifying configuration parameters")
+
+    success = verifyOcp(config.ocp)
+    success = verifyNws4(config.flavor.nws4) and success
+    success = verifyHdb(config.flavor.hdb)   and success
+    success = verifyNfs(config.nfs)          and success
+    success = verifySAPSystem(config)        and success
+    success = verifySshConnection(config)    and success
+
+    if not success:
+        print('Verifying configuration parameters: '
+              'error(s) in configuration file.\n'
+              'See previous messages for detailed information.')
+        sys.exit(1)
+    else:
+        print('Verifying configuration parameters: '
+              'configuration file successfully verified.')
+
+# ----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+    _main()
+    sys.exit(0)

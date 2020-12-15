@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Setup overlay file system on NFS server """
+
+# Global modules
+
+import sys
+import uuid
+
+# Local modules
+
+from modules.args     import getCommonArgsParser
+from modules.command  import CmdSsh
+from modules.config   import getConfig
+from modules.logger   import setupLogging
+from modules.nfsTools import (
+    getHdbSubDirs,
+    getOverlayDirs
+)
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Setup overlay file system on NFS server'
+    )
+
+    return parser.parse_args()
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+
+    args = _getArgs()
+
+    setupLogging(args)
+
+    config = getConfig(args.config_file, True)
+    cmdSsh = CmdSsh(config.nfs.host, config.nfs.user)
+
+    # pylint: disable=bad-whitespace
+
+    overlayUuid  = f'{uuid.uuid1()}'
+    overlayUuid += f'-{config.ocp.user}'
+    overlayUuid += f'-{config.ocp.project}'
+    overlayUuid += f'-{config.flavor.hdb.host}'
+    overlayUuid += f'-{config.flavor.hdb.sid}'
+
+    # Making an overlay-fs NFS-mountable requires additional mount
+    # options when establishing the overlay-fs; see also:
+    #
+    #   https://serverfault.com/questions/949892/nfs-export-an-overlay-of-ext4-and-btrfs
+    #   https://www.kernel.org/doc/Documentation/filesystems/overlayfs.txt
+    #
+    # XXX NEEDED OPTIONS MAY DEPEND ON FILESYSTEM TYPE OF lower, work AND upper -
+    #     THIS MAY VARY FROM CUSTOMER TO CUSTOMER
+
+    nfsOpts = ''
+    # nfsOpts += (' -o comment=merge')
+    nfsOpts += (' -o nfs_export=on')
+    nfsOpts += (' -o index=on')
+    # nfsOpts += (' -o redirect_dir=nofollow')
+    # nfsOpts += (' -o xino=on')
+
+    # Create the directory structure for each overlay file system,
+    # establish the overlay fs and add a corresponding entry to /etc/exports
+
+    for subDir in getHdbSubDirs():
+        ovld = getOverlayDirs(config, subDir, overlayUuid)
+
+        cmdSsh.run(f"mkdir -p '{ovld.upper}' '{ovld.work}' '{ovld.merged}'")
+
+        mountCmd = 'mount -t overlay overlay'
+        mountCmd += f' -olowerdir={ovld.lower},upperdir={ovld.upper},workdir={ovld.work}'
+        mountCmd += f' {nfsOpts}'
+        mountCmd += f' {ovld.merged}'
+
+        cmdSsh.run(mountCmd)
+
+        exportOpts = ''
+        exportOpts += 'rw'
+        exportOpts += ',insecure'
+        exportOpts += ',no_root_squash'
+        exportOpts += ',sync'
+
+        # Need to make the file systems unique - otherwise rpc.mountd
+        # will always offer the first mounted file system.
+
+        exportOpts += f',fsid={uuid.uuid1()}'
+
+        cmdSsh.run(f'echo "{ovld.merged} *({exportOpts})" >> /etc/exports')
+
+    # Export the overlay file systems
+
+    cmdSsh.run('exportfs -ar')
+
+    # Return the uuid of the created overlay shares
+
+    print(f'{overlayUuid}')
+
+# ----------------------------------------------------------------------
+
+
+if __name__ == "__main__":
+    _main()
+    sys.exit(0)

@@ -1,0 +1,39 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- name: push INIT image into ocp cluster
+  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f init -w"
+  register: outmsg_init
+- name: show result after pushing INIT image
+  debug:
+    var: outmsg_init.stdout
+- name: push NWS4 image into ocp cluster
+  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f nws4 -w"
+  register: outmsg_nws4
+- name: show result after pushing NWS4 image
+  debug:
+    var: outmsg_nws4.stdout
+- name: push SAP HANA container image
+  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f hdb -w"
+  register: outmsg_hdb
+- name: show result after pushing SAP HANA container
+  debug:
+    var: outmsg_hdb.stdout
+- import_tasks: ../../../tasks/oc-user-login.yml
+- name: verify whether the images are available in the local registry of the OpenShift cluster
+  command: oc get imagestream
+  register: out_image_stream
+- debug: var=out_image_stream.stdout_lines

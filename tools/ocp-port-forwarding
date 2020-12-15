@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" SSH port forwarding for creating a SAP GUI connection to the containerized SAP system """
+
+# Global modules
+
+import logging
+import os
+import socket
+import sys
+
+# Local modules
+
+from modules.args    import (
+    getCommonArgsParser,
+    addArgHelperUser
+)
+from modules.command import CmdShell
+from modules.config  import getConfig
+from modules.logger  import setupLogging
+from modules.tools   import ocLogin
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'SSH port forwarding for creating a SAP GUI connection to the containerized SAP system'
+    )
+
+    addArgHelperUser(parser, False)
+
+    return parser.parse_args()
+
+
+def _getWorkerIp(config):
+    """ Get the cluster IP address of the worker node on which the SAP system is running """
+    return CmdShell().run(
+        'oc get pods'
+        + f' --selector="app=soos-{config.flavor.nws4.sid.lower()}"'
+        + ' -o template --template "{{range .items}}{{.status.hostIP}}{{end}}"'
+    ).out
+
+
+def _getNodePort(config):
+    """ Get the node port on the worker node which can be used to connect to the SAP system """
+    return CmdShell().run(
+        f'oc get service soos-{config.flavor.nws4.sid.lower()}-np'
+        + ' -o template --template "{{range .spec.ports}}{{.nodePort}}{{end}}"'
+    ).out
+
+
+def _getHelperIp(config):
+    """ Get the intranet IP address of the helper node which serves as gateway into the cluster """
+    return socket.gethostbyname(config.ocp.helperHost)
+
+
+def _portInUse(port):
+    """ Check whether local port is in use """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sck:
+        inUse = sck.connect_ex(('localhost', port)) == 0
+        logging.debug(f'inUse: >>>{inUse}<<<')
+        return inUse
+
+
+def _findFreePort(minPort, maxPort):
+    """ Find free local port in given port range """
+    port = minPort
+    while port <= maxPort:
+        if not _portInUse(port):
+            return port
+        port += 1
+    return None
+
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+    """ Main function """
+
+    args = _getArgs()
+
+    setupLogging(args)
+
+    config = getConfig(args.config_file, True)
+
+    ocLogin(config)
+
+    diInstNo = config.flavor.nws4.di.instNo
+    workerIp = _getWorkerIp(config)
+    nodePort = _getNodePort(config)
+    helperUser = args.helper_user
+    helperIp = _getHelperIp(config)
+
+    portBase = 3200
+
+    localPort = portBase+int(diInstNo)
+
+    if _portInUse(localPort):
+        localPort = _findFreePort(portBase, portBase+99)
+        if not localPort:
+            print('Cannot find a free local port to bind to', file=sys.stderr)
+            sys.exit(1)
+
+    diInstNo = f'{localPort-portBase:02d}'
+
+    sep = '-'*40
+    print(f'\nEstablishing port forwarding to SAP system'
+          f" '{config.flavor.nws4.sid}' in cluster '{config.ocp.domain}'\n\n"
+          f'Use the following parameters to create a SAP GUI connection:\n\n'
+          f'{sep}\n'
+          f'   System ID           {config.flavor.nws4.sid}\n'
+          f'   Instance Number     {diInstNo}\n'
+          f'   Application Server  {socket.gethostname()}\n'
+          f'{sep}\n')
+
+    os.execlp('ssh', 'ssh', '-N', '-g', '-L',
+              f'32{diInstNo}:{workerIp}:{nodePort}', f'{helperUser}@{helperIp}')
+
+    # ----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+    _main()
+    sys.exit(0)

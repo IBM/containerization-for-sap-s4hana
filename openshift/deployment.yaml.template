@@ -1,0 +1,133 @@
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{PROJECT}}     
+  name: {{DEPLOYMENT_NAME}}-np 
+spec:
+  type: NodePort
+  ports:
+  - port: 32{{NWS4_DI_INSTNO}}
+    targetPort: 32{{NWS4_DI_INSTNO}}
+    #nodePort: 302{{NWS4_DI_INSTNO}}
+    protocol: TCP
+  selector:
+    app: {{NWS4_IMAGE_NAME_SHORT}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{DEPLOYMENT_NAME}}
+  namespace: {{PROJECT}}     
+  labels:
+    app: {{DEPLOYMENT_NAME}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{DEPLOYMENT_NAME}}
+  template:
+    metadata:
+      labels:
+        app:
+          {{DEPLOYMENT_NAME}}
+    spec: 
+      hostname: {{NWS4_PQHN}}
+      serviceAccountName: {{SERVICE_ACCOUNT_NAME}}
+      volumes:
+        - name: envdir-ascs
+          emptyDir: {}
+        - name: envdir-di
+          emptyDir: {}
+        - name: envdir-hdb
+          emptyDir: {}
+        - name: nfs-data
+          nfs:
+            server: {{NFS_INTRANET_IP}}
+            path: {{NFS_PARENT_DIR}}/data/{{HDB_SAPSID}}
+        - name: nfs-log
+          nfs:
+            server: {{NFS_INTRANET_IP}}
+            path: {{NFS_PARENT_DIR}}/log/{{HDB_SAPSID}}
+      initContainers:
+        - name: soos-init
+          image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{INIT_IMAGE_NAME_SHORT}}
+          env:
+          # Common for HDB and NWS4 containers
+          - name: SOOS_GLOBAL_TIMEZONE
+            value: Europe/Berlin
+          # NWS4 Container
+          - name: SOOS_NWS4_HOST
+            value: {{NWS4_PQHN}}
+          - name: SOOS_NWS4_DOMAIN
+            value: {{NWS4_FQHN}}
+          - name: SOOS_NWS4_SID
+            value: {{NWS4_SAPSID}}
+          # ASCS
+          - name: SOOS_ASCS_PROFILE
+            value: {{NWS4_ASCS_PROFILE}}
+          - name: SOOS_ASCS_INSTNO
+            value: "{{NWS4_ASCS_INSTNO}}"
+          # DI
+          - name: SOOS_DI_PROFILE
+            value: {{NWS4_DI_PROFILE}}
+          - name: SOOS_DI_INSTNO
+            value: "{{NWS4_DI_INSTNO}}"
+          # HDB container
+          - name: SOOS_HDB_HOST
+            value: {{HDB_PQHN}}
+            #- name: SOOS_HDB_DOMAIN
+            #  value: {{HDB_FQHN}}
+          - name: SOOS_HDB_SID
+            value: {{HDB_SAPSID}}
+          - name: SOOS_HDB_BASE_DIR
+            value: {{HDB_BASE}}
+          volumeMounts:
+          - name: envdir-ascs
+            mountPath: "/envdir-ascs"
+          - name: envdir-di
+            mountPath: "/envdir-di"
+          - name: envdir-hdb
+            mountPath: "/envdir-hdb"
+      containers:
+        # HANA DB Container 
+        - name: {{HDB_CONTAINER_NAME}}
+          image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{HDB_IMAGE_NAME_SHORT}}
+          ports:
+            - containerPort: 3{{HDB_INSTNO}}13
+          volumeMounts:
+            - name: envdir-hdb
+              mountPath: /etc/sysconfig/soos
+            - name: nfs-data
+              mountPath: {{HDB_BASE}}/data/{{HDB_SAPSID}}
+            - name: nfs-log
+              mountPath: {{HDB_BASE}}/log/{{HDB_SAPSID}}
+        # NWS4 ASCS SAP System Container
+        - name: {{NWS4_ASCS_CONTAINER_NAME}}
+          image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{NWS4_IMAGE_NAME_SHORT}}
+          volumeMounts:
+            - name: envdir-ascs
+              mountPath: /etc/sysconfig/soos
+        # NWS4 DI SAP System Container
+        - name: {{NWS4_DI_CONTAINER_NAME}}
+          image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{NWS4_IMAGE_NAME_SHORT}}
+          ports:
+            - containerPort: 32{{NWS4_DI_INSTNO}}
+          volumeMounts:
+            - name: envdir-di
+              mountPath: /etc/sysconfig/soos

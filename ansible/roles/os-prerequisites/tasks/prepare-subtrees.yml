@@ -1,0 +1,73 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- name: prepare build dir
+  stat:
+    path: "{{ build_dir }}"
+  register: data_folder
+- name: "Is {{ build_dir }} already existing?"
+  debug:
+    msg: "{{ build_dir }} is already existing"
+  when: data_folder.stat.exists
+- name: create "{{ build_dir }}" if not exist
+  file:
+    path: "{{ build_dir }}"
+    state: directory
+#  command: mkdir -p "{{ build_dir }}"
+#  when: data_folder.stat.isdir is defined and data_folder.stat.isdir == false
+- name: ensure that "{{ new_dir_containers }}" is existing
+  file:
+    path: "{{ new_dir_containers }}"
+    state: directory
+  register: outmsg
+- debug: var=outmsg
+- name: move from "{{ subtree_1 }}" to "{{ new_dir_containers }}"
+  command: mv "{{ subtree_1 }}" "{{ new_dir_containers }}"
+  register: mv_outmsg
+  when: outmsg.state == "directory"
+- debug: 
+    var: mv_outmsg
+  when: mv_outmsg.rc is defined and mv_outmsg.rc != 0
+- stat: path="{{ subtree_1 }}"
+  register: out_sym1
+- name: create symbolic link ln -s "{{new_dir_containers}}"  "{{subtree_1}}"
+#  command: ln -s "{{new_dir_containers}}" "{{subtree_1}}"
+  file:
+    src: "{{ new_dir_containers }}"
+    dest: "{{ subtree_1 }}"
+    state: link
+#  when: out_sym1.stat.islnk is defined and out_sym1.stat.islnk == False
+- name: prepare new  "{{ new_var_tmp }}"
+  stat:
+    path: "{{ new_var_tmp }}"
+  register: data_dir
+- name: create "{{new_var_tmp}}" if not exist
+  file:
+    path: "{{ new_var_tmp }}"
+    state: directory
+#  command: mkdir -p "{{new_var_dir}}"
+#  when: data_dir.stat.isdir is defined and data_dir.stat.isdir == false
+- name: mv "{{subtree_2}}" to "{{new_var_tmp}}"
+  command: mv "{{subtree_2}}" "{{new_var_tmp}}"
+  register: mv_outmsg
+  when: data_dir.state == "directory"
+#  when: data_dir.stat.isdir is defined and data_dir.stat.isdir
+- debug: var=mv_outmsg
+- stat: path="{{subtree_2}}"
+  register: out_sym2
+- name: create symbolic link to "{{subtree_2}}"
+  command: ln -s "{{new_var_tmp}}" "{{subtree_2}}"
+  when: out_sym2.stat.islnk is defined and out_sym2.stat.islnk == False

@@ -1,0 +1,84 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- name: building INIT container image
+  shell: "cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -f init -v debug"
+  register: outmsg
+  ignore_errors: true
+- name: cat result after building INIT container image
+  shell: "cat {{path_to_ocp_tool}}/ansible/log/*"
+  register: outmsg_init
+  ignore_errors: true
+- name: show result after building INIT container image
+  debug:
+    var: outmsg_init.stdout_lines
+  ignore_errors: true
+- name: show stderr when rc!=0 after building INIT container image
+  fail:
+    msg: outmsg_init.stderr_lines
+  when: outmsg_init.rc != 0
+- name: delete old logs
+  file:
+    path: "{{ path_to_ocp_tool }}/ansible/log"
+    state: absent
+
+- name: building NWS4 container image
+  shell: "cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -f nws4 -v debug"
+  register: outmsg
+  ignore_errors: true
+- name: cat result after building NWS4 container image
+  shell: "cat {{path_to_ocp_tool}}/ansible/log/*" 
+  register: outmsg_nws4
+  ignore_errors: true
+- name: show result after building NWS4 container image
+  debug:
+    var: outmsg_nws4.stdout_lines
+  ignore_errors: true
+- name: show stderr when rc!=0 after building NWS4 container image
+  fail:
+    msg: outmsg_nws4.stderr_lines
+  when: outmsg_nws4.rc != 0
+- name: delete old logs
+  file:
+    path: "{{ path_to_ocp_tool }}/ansible/log"
+    state: absent
+
+- name: building SAP HANA container image
+  shell: "cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -f hdb -v debug"
+  register: outmsg
+- name: cat result after building SAP HANA container image
+  shell: "cat {{path_to_ocp_tool}}/ansible/log/*"
+  register: outmsg_hdb
+  ignore_errors: true
+- name: show result after building SAP HANA container image
+  debug:
+    var: outmsg_hdb.stdout_lines
+  ignore_errors: true
+- name: show stderr when rc!=0 after building SAP HANA container image
+  fail:
+    msg: outmsg_hdb.stderr_lines
+  when: outmsg_hdb.rc != 0
+- name: delete old logs
+  file:
+    path: "{{ path_to_ocp_tool }}/ansible/log"
+    state: absent
+
+- name: verify the images
+  shell: "podman images soos"
+  register: out_img
+- name: show image building result
+  debug:
+    var: out_img.stdout_lines

@@ -1,0 +1,26 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- name: install a "{{ package_state }}" version of git
+  package:
+    name: git
+    state: "{{ package_state }}"
+- name: Download the tool containerization-for-sap-s4hana from the GitHub repository
+  git: repo="{{ github_repo_url }}" dest="{{ path_to_ocp_tool }}" accept_hostkey=yes key_file="{{ github_key_file }}"
+  when: github_key_file is defined
+- name: Download the tool containerization-for-sap-s4hana from the GitHub repository
+  git: repo="{{ github_repo_url }}" dest="{{ path_to_ocp_tool }}" accept_hostkey=yes
+  when: github_key_file is not defined

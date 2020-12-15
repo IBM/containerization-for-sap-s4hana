@@ -1,0 +1,74 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- import_tasks: ../../../tasks/oc-user-login.yml
+
+- name: "set oc_project: {{ oc_project_name }}"
+  set_fact:
+    oc_project: "{{ oc_project_name }}"
+- name: check if the project "{{ oc_project_name }}" is already existing
+  shell: "oc get projects" 
+  register: oc_all_projects
+
+- name: create a new project if "{{ oc_project_name }}" does not exist
+  shell: "oc new-project {{oc_project_name}}"
+  register: outmsg
+  when: oc_project not in oc_all_projects.stdout
+- name: show new-project
+  debug: var=outmsg
+
+- name: choose your project
+  shell: "oc project {{oc_project_name}}"
+- name: get service account
+  shell: "oc get serviceaccount"
+  register: outmsg
+- debug: var=outmsg.stdout
+  when: outmsg.rc==0
+- debug:
+    msg: "outmsg.stderr"
+  failed_when: outmsg.rc != 0
+
+- import_tasks: ../../../tasks/oc-admin-login.yml
+
+- name: enable the Image Registry default route, patch the Image Registry Operator
+  shell: "oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{\"spec\":{\"defaultRoute\":true}}'"
+  register: r_msg
+- name: show Image Registry default route
+  debug: var=r_msg
+
+- name: add permission
+  shell: "oc adm policy add-scc-to-group anyuid 'system:serviceaccounts:{{oc_project_name}}'"
+  register: out_p
+- name: show permission settings
+  debug: var=out_p.stdout
+
+- name: generate ocp service-account
+  shell: "{{path_to_ocp_tool}}/tools/ocp-service-account-gen -c {{path_to_ocp_tool}}/config.yaml -o {{path_to_ocp_tool}}/{{oc_project_name}}-service-account.yaml -w"
+  register: out_b
+- name: show where the file {{oc_project_name}}-service-account.yaml is created 
+  debug: var=out_b.stdout
+
+- name: generate the service account {{oc_project_name}}-service-account.yaml
+  shell: "oc apply -f {{path_to_ocp_tool}}/{{oc_project_name}}-service-account.yaml"
+  register: out_m
+- name: show result after generating the service account
+  debug: var=out_m
+
+- name: add the required security context constraints to the service account
+  shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{oc_project_name}}:{{oc_project_name}}-sa"
+  register: out_msg
+- name: show result after add-scc-to-user
+  debug: var=out_msg

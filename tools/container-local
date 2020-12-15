@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Run containers locally using podman """
+
+# Global modules
+
+import logging
+import os
+import sys
+
+# Local modules
+
+from modules.args     import (
+    getCommonArgsParser,
+    addArgFlavor,
+    addArgNws4InstanceType,
+    addArgOverlayUuid
+)
+from modules.command  import CmdShell
+from modules.config   import getConfig
+from modules.logger   import setupLogging
+from modules.nfsTools import getOverlayBase
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Run containers locally using podman'
+    )
+
+    addArgFlavor(parser, ('nws4', 'hdb'), False)
+    addArgNws4InstanceType(parser, ('di', 'ascs'), False)
+    addArgOverlayUuid(parser, False)
+
+    # pylint: disable=bad-whitespace
+
+    parser.add_argument(
+        '-a',
+        '--action',
+        metavar  = '<action>',
+        required = True,
+        choices  = ['start', 'stop'],
+        help     = "Action: 'start' or 'stop' container"
+    )
+    parser.add_argument(
+        '-t',
+        '--local-tmp-dir',
+        metavar  = '<local-tmp-dir>',
+        default  = f'{os.getcwd()}/tmp',
+        required = False,
+        help     = f"Local temporary directory"
+    )
+
+    return parser.parse_args()
+
+
+def _getDnsServers():
+    """ Get DNS servers from /etc/resolv.conf """
+    # XXX DOES THIS ALWAYS WORK? PROBABLY NOT!
+    dnsServers = []
+    with open('/etc/resolv.conf', 'r') as fh:  # pylint: disable=invalid-name
+        for line in fh.readlines():
+            if line.startswith('nameserver'):
+                dnsServers.append(line.split()[1])
+    return dnsServers
+
+
+def _hdbStart(args, config):
+    """ Start SAP HANA database container """
+    # pylint: disable=bad-whitespace
+    # pylint: disable=too-many-locals
+    sid         = config.flavor.hdb.sid       # System ID
+    instNo      = config.flavor.hdb.instNo    # HDB Instance Number
+    hdbHost     = config.flavor.hdb.host      # Host of source SAP system
+    timezone    = config.flavor.hdb.timezone  # Time zone of source SAP system
+    nfsHost     = config.nfs.host             # NFS host
+    overlayBase = getOverlayBase(config, args.overlay_uuid)
+    hdbBaseDir  = config.flavor.hdb.base      # Location of global HANA directory in HDB container
+
+    cmdShell = CmdShell()
+
+    # Environment variables
+
+    localEnvfileDir = f'{args.local_tmp_dir}/{sid.upper()}_HDB'
+    cmdShell.run(f"mkdir -p '{localEnvfileDir}'")
+    file = f'{localEnvfileDir}/soos-env'
+    with open(file, 'w') as fh:  # pylint: disable=invalid-name
+        print(f"SOOS_GLOBAL_TIMEZONE={timezone}\n"
+              f"SOOS_HDB_HOST={hdbHost}\n"
+              f"SOOS_HDB_SID={sid.upper()}\n"
+              f"SOOS_HDB_BASE_DIR={hdbBaseDir}", file=fh)
+
+    # HANA DB overlay shares
+
+    localDataDir = f'{args.local_tmp_dir}/mount/data/{sid.upper()}'
+    localLogDir  = f'{args.local_tmp_dir}/mount/log/{sid.upper()}'
+    cmdShell.run(f'mkdir -p {localDataDir}')
+    cmdShell.run(f'mkdir -p {localLogDir}')
+    cmdShell.run(f'mount {nfsHost}:{overlayBase}/data/{sid.upper()} {localDataDir}')
+    cmdShell.run(f'mount {nfsHost}:{overlayBase}/log/{sid.upper()} {localLogDir}')
+
+    # Container start
+
+    imageName     = config.flavor.hdb.imageNames.local
+    containerName = config.flavor.hdb.containerName
+    logging.debug(f'containerName >>>{containerName}<<<')
+    podmanArgs = ''
+    podmanArgs += f' --detach'
+    podmanArgs += f' --name {containerName}'
+    podmanArgs += f' --hostname {hdbHost}'
+    podmanArgs += f' --publish 30{instNo}3:30{instNo}3'
+    for dnsServer in _getDnsServers():
+        podmanArgs += f' --dns "{dnsServer}"'
+    podmanArgs += f' -v "{localDataDir}:{hdbBaseDir}/data/{sid.upper()}"'
+    podmanArgs += f' -v "{localLogDir}:{hdbBaseDir}/log/{sid.upper()}"'
+    podmanArgs += f' -v "{localEnvfileDir}:/etc/sysconfig/soos"'
+    podmanArgs += f' --privileged'  # Needed for NFS mount of HANA direcotries
+
+    cmdShell.run(f"podman run {podmanArgs} {imageName}")
+
+    print(f"HDB container '{containerName}' started")
+
+
+def _nws4Start(args, config):
+    """ Start SAP ASCS and dialog instance containers """
+    # pylint: disable=bad-whitespace
+    # pylint: disable=too-many-locals
+    sid         = config.flavor.nws4.sid       # System ID
+    instType    = args.nws4_instance_type      # Instance type
+    instProfile = getattr(config.flavor.nws4, instType.lower()).profileName  # Instance profile
+    instNo      = getattr(config.flavor.nws4, instType.lower()).instNo       # Instance number
+    host        = config.flavor.nws4.host      # Host of source SAP system
+    domain      = config.flavor.nws4.sapfqdn   # Domain name of source SAP system
+    timezone    = config.flavor.nws4.timezone  # Time zone
+
+    cmdShell = CmdShell()
+
+    # Environment variables
+
+    localEnvfileDir = f'{args.local_tmp_dir}/{sid.upper()}_{instType.upper()}'
+    cmdShell.run(f"mkdir -p '{localEnvfileDir}'")
+    file = f'{localEnvfileDir}/soos-env'
+    with open(file, 'w') as fh:  # pylint: disable=invalid-name
+        print(f"SOOS_GLOBAL_TIMEZONE={timezone}\n"
+              f"SOOS_NWS4_HOST={host}\n"
+              f"SOOS_NWS4_DOMAIN={domain}\n"
+              f"SOOS_NWS4_SID={sid.upper()}\n"
+              f"SOOS_NWS4_PROFILE={instProfile}\n"
+              f"SOOS_NWS4_INSTNO={instNo}\n"
+              f"SOOS_NWS4_INSTTYPE={instType.upper()}",
+              file=fh
+              )  # pylint: disable=bad-continuation
+
+    # Container start
+
+    imageName     = config.flavor.nws4.imageNames.local
+    containerName = getattr(config.flavor.nws4, instType.lower()).containerName
+    logging.debug(f'containerName >>>{containerName}<<<')
+    podmanArgs = ''
+    podmanArgs += f' --detach'
+    podmanArgs += f' --name {containerName}'
+    podmanArgs += f' --hostname {host}'
+    if instType.lower() == 'di':
+        podmanArgs += f' --publish 32{instNo}:32{instNo}'
+    for dnsServer in _getDnsServers():
+        podmanArgs += f' --dns "{dnsServer}"'
+    podmanArgs += f' -v "{localEnvfileDir}:/etc/sysconfig/soos"'
+
+    cmdShell.run(f"podman run {podmanArgs} {imageName}")
+
+    print(f"NWS4 container '{containerName}' started")
+
+
+def _hdbStop(args, config):
+    """ Stop SAP HANA database container """
+    # pylint: disable=unused-argument
+    print('NOT YET IMPLEMENTED', file=sys.stderr)
+    sys.exit(1)
+
+
+def _nws4Stop(args, config):
+    """ Start SAP ASCS and dialog instance containers """
+    # pylint: disable=unused-argument
+    print('NOT YET IMPLEMENTED', file=sys.stderr)
+    sys.exit(1)
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+    """ Main function """
+
+    args = _getArgs()
+
+    setupLogging(args)
+
+    config = getConfig(args.config_file, True)
+
+    def _usageHdb():
+        print("Please specify a UUID of an existing overlay share with option '-u'",
+              file=sys.stderr)
+        sys.exit(1)
+
+    def _usageNws4():
+        print("Please specify a 'nws4' instance type ('ascs' or 'di') with option '-i'",
+              file=sys.stderr)
+        sys.exit(1)
+
+    if args.action == 'start':
+        if args.flavor == 'hdb':
+            if args.overlay_uuid:
+                _hdbStart(args, config)
+            else:
+                _usageHdb()
+        elif args.flavor == 'nws4':
+            if args.nws4_instance_type:
+                _nws4Start(args, config)
+            else:
+                _usageNws4()
+    elif args.action == 'stop':
+        if args.flavor == 'hdb':
+            _hdbStop(args, config)
+        elif args.flavor == 'nws4':
+            if args.nws4_instance_type:
+                _nws4Stop(args, config)
+            else:
+                _usageNws4()
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    _main()
+    sys.exit(0)

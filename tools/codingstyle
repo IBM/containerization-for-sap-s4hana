@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2020 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Check coding style of python files """
+
+# Global modules
+
+import logging
+import os
+import sys
+
+# Local modules
+
+from modules.args    import getCommonArgsParser
+from modules.command import CmdShell
+from modules.logger  import setupLogging
+
+# Classes
+
+
+class _Autopep8:
+    """ Execute autopep8 """
+    autopep8Ignores = [
+        'E226',  # default ignore
+        'E24',   # default ignore
+        'W50',   # default ignore
+        'W690',  # default ignore
+        'E251',  # don't fix whitespaces for named function parameters
+        'E221',  # don't fix whitespaces for named function parameters
+        'E271',  # don't remove extraneous whitespace around keywords
+        'E272',  # don't remove extraneous whitespace around keywords
+    ]
+
+    autopep8 = 'autopep8'
+    autopep8 += ' --verbose'
+    # autopep8 += ' --in-place'
+    autopep8 += ' --max-line-length 100'
+    autopep8 += ' --ignore ' + ','.join(autopep8Ignores)
+
+    def __init__(self, file, diffTool):
+        # pylint: disable=bad-whitespace
+        self._file     = file
+        self._fileAp8  = f'{file}.ap8'
+        self._diffTool = diffTool
+        self._cmdShell = CmdShell()
+
+    def run(self):
+        """ Execute autopep8 on given file """
+        print(self._cmdShell.run(f'{_Autopep8.autopep8} {self._file} > {self._fileAp8}').err)
+
+    def diff(self):
+        """ Diff file against autopep8 output """
+        print(self._cmdShell.run(f'{self._diffTool} {self._file} {self._fileAp8}').out)
+
+    def remove(self):
+        """ Remove temporary file created by autopep8 """
+        os.remove(self._fileAp8)
+
+
+class _Pylint:
+    """ Execute pylint """
+    pylintIgnores = [
+        'no-self-use',
+        'too-few-public-methods'
+    ]
+
+    pylint = 'pylint-3'
+    pylint += ' --logging-format-style=fstr'
+    pylint += ' --function-naming-style=camelCase'
+    pylint += ' --argument-naming-style=camelCase'
+    pylint += ' --variable-naming-style=camelCase'
+    pylint += ' --method-naming-style=camelCase'
+    pylint += ' --attr-naming-style=camelCase'
+    pylint += " --module-rgx='(?:(?P<kebab>[a-z-]+))'"
+    pylint += ' --disable=' + ','.join(pylintIgnores)
+
+    cmdShell = CmdShell()
+
+    @classmethod
+    def run(cls, file):
+        """ Execute pylint on given file """
+        print(cls.cmdShell.run(f'{cls.pylint} {file}').out)
+
+# Functions
+
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Check coding style of python files'
+    )
+
+    # pylint: disable=bad-whitespace
+
+    parser.add_argument(
+        '-s',
+        '--source',
+        metavar  = '<source>',
+        required = True,
+        help     = 'Name of file or directory that is to be checked'
+    )
+    parser.add_argument(
+        '-i',
+        '--interactive',
+        required = False,
+        action   ='store_true',
+        help     = "Allow manual interaction between check steps"
+    )
+    parser.add_argument(
+        '-r',
+        '--recursion-level',
+        type     = int,
+        metavar  = '<recursion-level>',
+        required = False,
+        default  = 0,
+        help     = "Perform recursive check up to depth <recursion-level> "
+                   "if <source> is a directory; ('-1': no depth limitation)"
+    )
+    diffTools = [
+        'diff -u',  # first entry is default tool
+        'meld'
+    ]
+    parser.add_argument(
+        '-d',
+        '--difftool',
+        metavar  = '<difftool>',
+        required = False,
+        choices  = diffTools,
+        default  = diffTools[0],
+        help     = "Select tool for diffing after autopep8 corrections "
+                   "('"+"', '".join(diffTools)+f"')"
+    )
+    return parser.parse_args()
+
+
+def _printStepHeader(message, headChar):
+    print(headChar*70)
+    print(' ' + message)
+    print(headChar*70)
+
+
+def _printStepHeader1(message):
+    print()
+    _printStepHeader(message, '=')
+
+
+def _printStepHeader2(message):
+    _printStepHeader(message, '-')
+
+
+def _waitForInput():
+    input('Press <Enter> to continue ')
+
+
+def _ignoreFile(file):
+    ignoreFile = False
+    ignoreFile = ignoreFile or file.endswith('~')
+    ignoreFile = ignoreFile or file.endswith('.ap8')
+    ignoreFile = ignoreFile or file.endswith('.backup')
+    logging.debug(f"'{file}': returning {ignoreFile}")
+    return ignoreFile
+
+
+def _ignoreDir(directory):
+    ignoreDir = False
+    ignoreDir = ignoreDir or directory.endswith('__pycache__')
+    logging.debug(f"'{directory}': returning {ignoreDir}")
+    return ignoreDir
+
+
+def _isPythonFile(file):
+    isPythonFile = False
+    if file.endswith('.py'):
+        isPythonFile = True
+    else:
+        with open(file, 'r') as fh:  # pylint: disable=invalid-name
+            content = fh.read()
+            isPythonFile = content.startswith('#!/usr/bin/env python3')
+    logging.debug(f"'{file}': returning {isPythonFile}")
+    return isPythonFile
+
+
+def _checkFileOrDir(fileDir, diffTool, recLevel, maxRecLevel, interactive):
+    if os.path.isfile(fileDir):
+        logging.debug(f"'{fileDir}': is file")
+        _checkFile(fileDir, diffTool, interactive)
+    elif os.path.isdir(fileDir):
+        logging.debug(f"'{fileDir}': is directory")
+        _checkDir(fileDir, diffTool, recLevel, maxRecLevel, interactive)
+    else:
+        logging.debug(f"'{fileDir}': ignoring")
+        _printStepHeader1(f"'{fileDir}' is neither a file nor a directory - ignoring")
+
+
+def _checkDir(directory, diffTool, recLevel, maxRecLevel, interactive):
+    if _ignoreDir(directory):
+        _printStepHeader1(f"Ignoring directory '{directory}'")
+        return
+
+    if recLevel <= maxRecLevel or maxRecLevel == -1:
+        _printStepHeader1(f"Checking directory '{directory}'")
+        for file in os.listdir(directory):
+            _checkFileOrDir(f'{directory}/{file}', diffTool, recLevel+1, maxRecLevel, interactive)
+    else:
+        _printStepHeader1(f"Not descending into directory '{directory}'")
+
+
+def _checkFile(file, diffTool, interactive):
+    if _ignoreFile(file) or not _isPythonFile(file):
+        _printStepHeader1(f"Ignoring file '{file}'")
+        return
+
+    _printStepHeader1(f"Checking file '{file}'")
+
+    autopep8 = _Autopep8(file, diffTool)
+
+    _printStepHeader2(f"Running autopep8 on '{file}'")
+    autopep8.run()
+
+    _printStepHeader2(f"Diffing '{file}' against autopep8 output")
+    autopep8.diff()
+
+    if interactive:
+        _waitForInput()
+
+    _printStepHeader2(f"Running pylint on '{file}'")
+    _Pylint.run(file)
+
+    if interactive:
+        _waitForInput()
+
+    autopep8.remove()
+
+
+def _main():
+    args = _getArgs()
+
+    setupLogging(args)
+
+    _checkFileOrDir(args.source, args.difftool, 0, args.recursion_level, args.interactive)
+
+# ----------------------------------------------------------------------
+
+
+if __name__ == "__main__":
+    _main()
+    sys.exit(0)
