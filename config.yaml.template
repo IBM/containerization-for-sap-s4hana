@@ -37,5 +37,5 @@ flavor:
 nfs:
   host:        <host>         # Host on which the NFS server is running
   user:        <user>         # User on nfs.host which is used for ssh and rsync operations (needs root permissions)
-  copyBase:    <copy-base>    # Path on nfs.host where directories {data,log} of the original HANA system are copied to
+  copyBase:    <copy-base>    # Path on nfs.host where directories {data,log} of the original SAP HANA system are copied to
   overlayBase: <overlay-base> # Path on nfs.host under which overlay file systems for container instances are created
