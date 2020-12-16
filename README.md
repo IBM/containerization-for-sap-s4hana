@@ -43,7 +43,7 @@ systems and run them on a Red Hat® OpenShift® cluster.
 - [General command line parameters](#general-command-line-parameters)
 - [Automated build and deployment](#automated-build-and-deployment)
 - [Manual build](#manual-build)
-  - [Creating a snapshot copy of your database](#creating-a-snapshot-copy-of-your-database)
+  - [Creating a snapshot copy of the reference database](#creating-a-snapshot-copy-of-the-reference-database)
   - [Building the container images at once](#building-the-container-images-at-once)
   - [Building the container images separately](#building-the-container-images-separately)
 - [Manual push](#manual-push)
@@ -52,7 +52,7 @@ systems and run them on a Red Hat® OpenShift® cluster.
   - [Generating a deployment description file](#generating-a-deployment-description-file)
   - [Starting the SAP system on the Red Hat OpenShift cluster](#starting-the-sap-system-on-the-red-hat-openshift-cluster)
 - [Verifying the correct start of the SAP system](#verifying-the-correct-start-of-the-sap-system)
-- [Logging on to a container](#logging-on-to-a-container)
+- [Logging into a container](#logging-into-a-container)
 - [Connecting to the SAP system](#connecting-to-the-sap-system)
 - [Testing the images locally](#testing-the-images-locally)
 - [Contributors](#contributors)
@@ -72,8 +72,8 @@ images in a Red Hat OpenShift cluster running on IBM Power® Systems.
 Three ways for build and deployment are supported:
 
 - using Python scripts from the command line
-- using Red Hat Ansible® scripts from the command line
-- using Red Hat Ansible Tower®.
+- using [Red Hat Ansible®](ansible/README.md#building-and-deploying-with-red-hat-ansible) scripts from the command line
+- using [Red Hat Ansible Tower®](ansible/README.md#building-and-deploying-with-red-hat-ansible-tower).
 
 ### Architecture and workflow
 
@@ -83,7 +83,7 @@ image build and container deployment:
 <img src="docs/images/BuildingImages.png" alt="workflow"
 	title="Workflow" width="1400" height="500" />
 
-The reference SAP system must be a *central system*, i.e. all
+The reference SAP system must be a central system, i.e. all
 instances including the database of the system must reside on one
 host. We support both SAP NetWeaver and SAP S/4HANA systems.
 
@@ -92,26 +92,24 @@ During the build phase three different images are created:
 - *Init* image: This image is reference-system-independent and is used
   during the initialization of the deployment in the cluster.
 
-- *SAP NetWeaver* image: This image contains all relevant components
-  of the reference system that are needed to start both the ASCS
-  and the DI containers. Although the image is named *SAP NetWeaver*
-  in the picture it contains the relevant SAP S4/HANA components if
-  the reference system is an SAP S/4HANA system.
+- *SAP AppServer* image: This image contains all relevant components
+  of the reference system that are needed to start both the *ABAP SAP
+  Central Services* (ASCS) and the *Dialog Instance* (DI) containers.
 
 - *SAP HANA* image: This image contains the SAP HANA® instance
-  directories. It does not contain the `/data` and the `/log`
+  directories. It does not contain the `data/` and the `log/`
   directory trees of the database. A snapshot of these two
   directory trees is copied to the NFS file server during the build
   phase. At deployment time an overlay file system is created on top of
-  the snapshot and mounted into the *SAP HANA* container.
+  the snapshot and mounted into the SAP HANA container.
 
-After the images are created they are copied to the internal cluster
-registry. At deployment time the images are copied to one of the
-cluster helper nodes. At deployment start the init container first
-sets up the environments for the application containers (ASCS, DI and
-*SAP HANA* containers). These are started after the init container has
-finished. During startup of the *SAP HANA* container the overlay
-file system is mounted.
+The images are pushed into the internal cluster registry. At
+deployment time the images are copied to the cluster helper node on
+which the deployment is started. At deployment start the init
+container sets up the environments for the application containers
+(ASCS, DI and SAP HANA containers). These are started after the init
+container has terminated. During startup of the SAP HANA container the
+overlay file system is mounted into the container.
 
 
 In the following we describe how to
@@ -139,13 +137,13 @@ SAP Note 1122387 - *Linux: SAP Support in virtualized environments*)**
 ### NFS server setup
 
 During image build a snapshot copy of the reference database is
-created. This copy is accessed by the running *SAP HANA* container via
+created. This copy is accessed by the running SAP HANA container via
 NFS. Therefore you need to setup a NFS server in your landscape which
 
 - has enough storage space to hold multiple copies of SAP HANA
   databases (order of magnitude: terabyte)
 
-- allows root access via ssh.
+- allows root access via SSH.
 
 ### Build and deploy prerequisites
 
@@ -153,7 +151,7 @@ NFS. Therefore you need to setup a NFS server in your landscape which
 > helper node. All actions described in the following should be
 > performed on the build machine, not on the helper node.**
 
-- The following software packages need to be installed on your build machine:
+- The following software packages need to be installed on the build machine:
 
   | Package    | Description |
   |:-----------|:----------|
@@ -164,18 +162,17 @@ NFS. Therefore you need to setup a NFS server in your landscape which
   | `paramiko` | Python 3 SSH client (available via [EPEL](https://www.redhat.com/en/blog/whats-epel-and-how-do-i-use-it) on RHEL 8) |
   
 - You need a clone of this repository on your build machine. Create
-  the clone by logging into your build machine and running the command
+  the clone by logging into the build machine and running the command
 
   ```shell
   $ git clone https://github.com/IBM/containerization-for-sap-s4hana.git
   ```
 
-- During image build files are copied from the host on which your
-  reference SAP system and database are installed to the build
-  system. To store this data and the generated images you need a file
-  system with at least 500 GB capacity. We assume in the following
-  that this file system is mounted at directory `/data` on your build
-  machine.
+- During image build files are copied from the host of your reference
+  SAP system to the build system. To store this data and the generated
+  images you need a file system with at least 500 GB capacity. We
+  assume in the following that this file system is mounted at
+  directory `/data` on the build machine.
 
   The two subtrees `/var/lib/containers` and `/var/tmp` should be
   moved from the root `/` file system to the `/data` file system since
@@ -196,7 +193,7 @@ NFS. Therefore you need to setup a NFS server in your landscape which
   $ ln -s /data/var/tmp /var/tmp
   ```
 
-- During the image build and deployment process multiple ssh
+- During the image build and deployment process multiple SSH
   connections are established to the NFS server and to the host on
   which the reference SAP system is installed. To avoid
   having to enter the SSH key passphrase or the login credentials on
@@ -211,19 +208,18 @@ NFS. Therefore you need to setup a NFS server in your landscape which
 - Since some of the described actions are performed on the helper node
   of your cluster you need an account on this host.
   
-- You can perform most of the actions described below on your build
-  machine. In order to be able to log into the cluster and to connect
-  to the local cluster registry some entries need to be added 
-  to the `/etc/hosts` file of your build machine. You can use the tool
+- Most of the actions described below can be performed on the build
+  machine. To enable cluster login and connections to the local
+  cluster registry from your build machine some entries need to be
+  added to the `/etc/hosts` file of the build machine. Use the tool
   
   ```shell
   tools/ocp-etc-hosts
   ```
 
-  to perform this task. Note that you require a valid configuration
-  file for running `ocp-etc-hosts` successfully (see section
-  [Preparing the configuration
-  file](#preparing-the-configuration-file)).
+  to perform this task. You require a valid configuration file for
+  running `ocp-etc-hosts` successfully (see section [Preparing the
+  configuration file](#preparing-the-configuration-file)).
 
 
 ### Red Hat OpenShift prerequisites
@@ -285,12 +281,12 @@ project proceed as follows:
 
 #### Permissions setup
 
-- You need permission to run your containers in your project in
+- You need permission to run the containers in your project in
   privileged mode. To obtain the permission log into the cluster as
   cluster administrator
 
   ```shell
-  $ oc login --token=<admin-login-token> --server=https://api.<ocp-cluster-domain>:6443
+  $ oc login --insecure-skip-tls-verify=true https://api.<ocp-cluster-domain>:6443 -u <ocp-admin-name>
   ```
 
   and run
@@ -299,8 +295,8 @@ project proceed as follows:
   $ oc adm policy add-scc-to-group anyuid "system:serviceaccounts:<ocp-project-name>"
   ```
 
-- The *SAP HANA* container mounts the database `data`- and
-  `log`-directories via NFS. To allow NFS mounting for the container a
+- The SAP HANA container mounts the database `data/`- and
+  `log/`-directories via NFS. To allow NFS mounting for the container a
   service account with corresponding security context constraints
   (scc) is required. To create the service account proceed as follows:
 
@@ -310,7 +306,8 @@ project proceed as follows:
     $ tools/ocp-service-account-gen
     ```
 
-    to generate the file `<ocp-project-name>-service-account.yaml` in the root directory of you repository clone.
+    to generate the file `<ocp-project-name>-service-account.yaml` in
+    the root directory of your repository clone.
   
   - Generate the service account by running
 
@@ -343,7 +340,7 @@ Here
 
 - `<cluster-admin-pwd>` is the password of `<cluster-admin>`.
 
-Note that you need a valid configuration file for running
+You need a valid configuration file for running
 `tools/verify-ocp-settings` (see section [Preparing the configuration
 file](#preparing-the-configuration-file)).
 
@@ -370,10 +367,10 @@ in your configuration file:
 
 ## General command line parameters 
 
-The following command optional line parameters are available for all
-scripts in the `tools` directory:
+The following optional command line parameters are available for all
+scripts in the `tools/` directory of your repository clone:
 
-- The configuration file to use (default: `config.yaml`):
+- The configuration file to use (default: `./config.yaml`):
 
   ```shell
   -c / --config-file <configuration file> 
@@ -392,13 +389,13 @@ scripts in the `tools` directory:
   -g / --logfile-dir <logfile directory>
   ```
 
-  The directory will be created if it does not exist. If not
-  specified, directory `./log` is used to store logging
-  information. If `-w` is specified, this parameter is ignored.
+  The directory will be created if it does not exist. If `-g` is not
+  specified, directory `./log/` is used to store logging information. If
+  `-w` is specified, parameter `-g` is ignored.
 
 ## Automated build and deployment
 
-> :warning: **You have to stop your reference database before starting
+> :warning: **You have to stop the reference database before starting
 > the automated build!**
 
 - Run 
@@ -416,13 +413,13 @@ scripts in the `tools` directory:
 
 ## Manual Build
 
-Manual build involves creating a snapshot copy of the `data` and `log`
-directories of your SAP HANA database and building the three container
+Manual build involves creating a snapshot copy of the `data/` and `log/`
+directories of the reference database and building the three container
 images. The three images can be built at once or individually.
 
-### Creating a snapshot copy of your database
+### Creating a snapshot copy of the reference database
 
-> :warning: **You have to stop your reference database before creating
+> :warning: **You have to stop the reference database before creating
 > the snapshot!**
 
 - Run
@@ -437,12 +434,12 @@ images. The three images can be built at once or individually.
   $ tools/nfs-hdb-copy
   ```
 
-  to create a snapshot copy of the `data` and `log` directories of
-  your database on the NFS server. Dependent on the size of your
+  to create a snapshot copy of the `data/` and `log/` directories of
+  your database on the NFS server. Dependent on the size of the
   database this may take quite some time.
   
-- The copy is performed via an SSH connection between your NFS server
-  and the host on which the `data` and `log` directories of your
+- The copy is performed via an SSH connection between the NFS server
+  and the host on which the `data/` and `log/` directories of your
   reference database reside. Therefore the user which is specified as
   `nfs.user` in the `config.yaml` file must have an SSH key-pair
   installed which meets the following conditions:
@@ -462,9 +459,23 @@ images. The three images can be built at once or individually.
   $ tools/containerize -b
   ```
   
-  to build the three images at once.
+  to build the three images
   
-- Verify whether the images were built correctly by running
+  ```shell
+  localhost/soos-init:latest
+  localhost/soos-<nws4-sid>:latest
+  localhost/soos-<hdb-sid>:latest
+  ```
+  
+  at once where
+  
+  - `<nws4-sid>` is the SAP system ID of your reference SAP NetWeaver
+    or SAP S/4HANA system and
+
+  - `<hdb-sid>` is the SAP system ID of your reference database
+    system.
+  
+- Verify whether the images were correctly built by running
 
   ```shell
   $ podman images soos
@@ -488,7 +499,7 @@ images. The three images can be built at once or individually.
   localhost/soos-init:latest
   ```
   
-  Verify whether the image was built correctly by running
+  Verify whether the image was correctly built by running
 
   ```shell
   $ podman images soos-init
@@ -509,9 +520,9 @@ images. The three images can be built at once or individually.
   ```
 
   where `<nws4-sid>` is the SAP system ID of your reference SAP
-  NetWeaver / SAP S/4HANA system.
+  NetWeaver or SAP S/4HANA system.
 
-  Verify whether the image was built correctly by running
+  Verify whether the image was correctly built by running
 
   ```shell
   $ podman images soos-<nws4-sid>
@@ -534,7 +545,7 @@ images. The three images can be built at once or individually.
   where `<hdb-sid>` is the SAP system ID of your reference database
   system.
 
-  Verify whether the image was built correctly by running
+  Verify whether the image was correctly built by running
 
   ```shell
   $ podman images soos-<hdb-sid>
@@ -546,7 +557,7 @@ images. The three images can be built at once or individually.
 
 After image build, the three images are stored in the local podman
 registry of your build machine. In order to make them usable in your
-cluster you have to push them to the local registry of your cluster.
+cluster you have to push them to the local cluster registry.
 
 - Run
 
@@ -586,7 +597,7 @@ Starting the SAP system on the Red Hat OpenShift cluster involves
 three steps:
 
 - Creating a database overlay share on the NFS server which will be
-  used by the *SAP HANA* container.
+  used by the SAP HANA container.
 
 - Generating a deployment description file which describes the
   container setup and environment on your cluster.
@@ -614,7 +625,9 @@ three steps:
   ```
 
   of the freshly created overlay share. This unique ID is used when
-  generating a deployment description file (see below).
+  generating a deployment description file (see section [Generating a
+  deployment description
+  file](#generating-a-deployment-description-file)).
 
 - You can list all existing NFS overlay shares including their date
   and time of creation by running
@@ -735,7 +748,7 @@ three steps:
   ⋮
   ```
   
-  Only if each of this message is followed by a message
+  Only if each of these messages is followed by a message
   
 
   ```shell
@@ -774,9 +787,9 @@ three steps:
   soos-<nws4-sid>-np   NodePort   172.30.187.181   <none>        32<nws4-di-instno>:<node-port>/TCP   9m9s
   ```
   
-## Logging on to a container 
+## Logging into a container 
 
-You can easily logon to a container of your running SAP system by
+You can easily log into a container of your running SAP system by
 using the command `tools/ocp-container-login`.
 
 - To log into your ASCS container, use 
@@ -792,7 +805,7 @@ using the command `tools/ocp-container-login`.
   ```
   
 
-- To log into your *SAP HANA* container, use 
+- To log into your SAP HANA container, use 
 
    ```shell
    tools/ocp-container-login -f hdb
@@ -818,10 +831,15 @@ To establish a connection to the SAP system proceed as follows:
    Application Server  <build-machine-name>
    ```
    
-  In general, `<instno>` corresponds to the instance number of the
-  dialog instance of your reference system, but may be different if
-  the required port on the build machine is already taken by another
-  application.
+  - `<nws4-sid>` is the SAP system ID of your reference SAP NetWeaver
+    or SAP S/4HANA system
+
+  - `<instno>` in general corresponds to the instance number of the
+    dialog instance of your reference system. It may differ if the
+    required port on the build machine is already taken by another
+    application.
+  
+  - `<build-machine-name>` is the name of your build machine.
 
 - Define a SAP GUI connection using the above parameters and connect
   to your SAP system.
@@ -838,13 +856,20 @@ instance containers on your build machine.
   $ tools/container-local -a start -f hdb -u `<uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>`
   ```
 
-  to start a local *SAP HANA* container. Here
+  to start a local SAP HANA container. Here
   `<uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>` is
   the ID of an overlay share which was created as described in section
   [Creating a database overlay share on the NFS
-  server](#creating-a-database-overlay-share-on-the-nfs-server). The
-  script mounts the `data`- and `log`-directories of the overlay share
-  on the build machine and exposes them to the running container.
+  server](#creating-a-database-overlay-share-on-the-nfs-server).
+  
+  The script creates a `./tmp/` directory on the build machine, mounts
+  the `data/` and `log/` directories of the overlay share underneath
+  the `./tmp/` directory and exposes them to the running
+  container.<br/>
+  Cleaning up the `./tmp/` directory (unmounting the `data/` and
+  `log/` directories and cleaning up the intermediately created files
+  and directories) currently needs to be performed manually after the
+  teardown of the SAP HANA container.
 
 - Run
 
@@ -862,7 +887,7 @@ instance containers on your build machine.
   
   to start a dialog instance container. Currently it is not yet
   possible to establish a connection from a local dialog instance
-  container to the database which is running in a local *SAP HANA*
+  container to the database which is running in a local SAP HANA
   container. Therefore the dialog instance in the dialog instance
   container cannot start completely.
   
