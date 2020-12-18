@@ -54,27 +54,7 @@ SPDX-License-Identifier: Apache-2.0
 */
 ```
 
-We have tried to make it as easy as possible to make contributions. This
-applies to how we handle the legal aspects of contribution. We use the
-same approach - the [Developer's Certificate of Origin 1.1 (DCO)](https://github.com/hyperledger/fabric/blob/master/docs/source/DCO1.1.txt) - that the Linux® Kernel [community](https://elinux.org/Developer_Certificate_Of_Origin)
-uses to manage code contributions.
-
-We simply ask that when submitting a patch for review, the developer
-must include a sign-off statement in the commit message.
-
-Here is an example Signed-off-by line, which indicates that the
-submitter accepts the DCO:
-
-```
-Signed-off-by: John Doe <john.doe@example.com>
-```
-
-You can include this automatically when you commit a change to your
-local git repository using the following command:
-
-```
-git commit -s
-```
+We have tried to make it as easy as possible to make contributions. This applies to how we handle the legal aspects of contribution. We use [CLA assistant](https://cla-assistant.io/) which automatically asks you to sign the [Developer's Certificate of Origin 1.1 (DCO)](https://gist.github.com/jridfe/cb9ed03deb37baa644e64eea3a327065) when you open a pull request. For more information see the description of a pull request workflow in [this gist](https://gist.github.com/reicolina/f30d7475157f3bf21ec6807a6caff85a).
 
 ## Communication
 Please feel free to connect with us by using our [issue tracker](https://github.com/IBM/containerization-for-sap-s4hana/issues).

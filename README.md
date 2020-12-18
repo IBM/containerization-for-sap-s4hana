@@ -19,9 +19,7 @@
 # Containerization by IBM for SAP S/4HANA with Red Hat OpenShift
 
 [![License](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-<!--
 [![CLA assistant](https://cla-assistant.io/readme/badge/IBM/containerization-for-sap-s4hana)](https://cla-assistant.io/IBM/containerization-for-sap-s4hana)
--->
 
 Build container images from existing SAP® NetWeaver® and SAP® S/4HANA®
 systems and run them on a Red Hat® OpenShift® cluster.
