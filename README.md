@@ -1,13 +1,13 @@
 <!--
   ------------------------------------------------------------------------
   Copyright 2020 IBM Corp. All Rights Reserved.
- 
+
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
   You may obtain a copy of the License at
- 
+
       http://www.apache.org/licenses/LICENSE-2.0
- 
+
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,7 +32,7 @@ systems and run them on a Red Hat® OpenShift® cluster.
   <summary>Table of Contents</summary>
 
 - [Introduction](#introduction)
-  - [Supported methods](#supported-methods)
+  - [Build and deployment options](#build-and-deployment-options)
   - [Architecture and workflow](#architecture-and-workflow)
   - [Important note](#important-note)
 - [Prerequisites](#prerequisites)
@@ -61,15 +61,15 @@ systems and run them on a Red Hat® OpenShift® cluster.
 
 </details>
 
-## Introduction 
+## Introduction
 
 This project provides assets for building container images from
 existing SAP systems and deploying containers based on the created
 images in a Red Hat OpenShift cluster running on IBM Power® Systems.
 
-### Supported methods
+### Build and deployment options
 
-Three ways for build and deployment are supported:
+We provide three build and deployment options:
 
 - using Python scripts from the command line
 - using [Red Hat Ansible®](ansible/README.md#building-and-deploying-with-red-hat-ansible) scripts from the command line
@@ -81,11 +81,12 @@ The following picture describes the steps that are executed during
 image build and container deployment:
 
 <img src="docs/images/BuildingImages.png" alt="workflow"
-	title="Workflow" width="1400" height="500" />
+    title="Workflow" width="1400" height="500" />
 
-The reference SAP system must be a central system, i.e. all
-instances including the database of the system must reside on one
-host. We support both SAP NetWeaver and SAP S/4HANA systems.
+The reference SAP system must be a central system, i.e. all instances
+including the database of the system must reside on one host. We
+tested our solution with SAP NetWeaver and SAP S/4HANA reference
+systems.
 
 During the build phase three different images are created:
 
@@ -160,7 +161,7 @@ NFS. Therefore you need to setup a NFS server in your landscape which
   | `oc`       | Command line interface tool for Red Hat OpenShift |
   | `python3`  | Script interpreter |
   | `paramiko` | Python 3 SSH client (available via [EPEL](https://www.redhat.com/en/blog/whats-epel-and-how-do-i-use-it) on RHEL 8) |
-  
+
 - You need a clone of this repository on your build machine. Create
   the clone by logging into the build machine and running the command
 
@@ -178,11 +179,11 @@ NFS. Therefore you need to setup a NFS server in your landscape which
   moved from the root `/` file system to the `/data` file system since
   they are heavily used during image build possibly leading to an
   unwanted 100% fill up of the root `/` file system.
-  
+
   Run the following commands as user `root` on your build machine to
   move the two subtrees from the root `/` file system to the `/data`
   file system:
-  
+
   ```shell
   $ mkdir -p /data/var/lib
   $ mv /var/lib/containers /data/var/lib/containers
@@ -198,21 +199,21 @@ NFS. Therefore you need to setup a NFS server in your landscape which
   which the reference SAP system is installed. To avoid
   having to enter the SSH key passphrase or the login credentials on
   each SSH connection start it is recommendable to
-  
+
   - either run all actions described below under an `ssh-agent`
     session (see https://www.ssh.com/ssh/agent)
-  - or use a passphrase-less ssh key for connecting to the respective
+  - or use a passphrase-less SSH key for connecting to the respective
     systems (see https://www.redhat.com/sysadmin/passwordless-ssh).
 
 
 - Since some of the described actions are performed on the helper node
   of your cluster you need an account on this host.
-  
+
 - Most of the actions described below can be performed on the build
   machine. To enable cluster login and connections to the local
   cluster registry from your build machine some entries need to be
   added to the `/etc/hosts` file of the build machine. Use the tool
-  
+
   ```shell
   tools/ocp-etc-hosts
   ```
@@ -226,22 +227,22 @@ NFS. Therefore you need to setup a NFS server in your landscape which
 
 #### Worker nodes setup
 
-The SAP workload requires some specific settings on all worker nodes: 
+The SAP workload requires some specific settings on all worker nodes:
 
 - Disabling SELinux
 
-  You can check the SELinux status on the worker nodes by executing 
+  You can check the SELinux status on the worker nodes by executing
 
   ```shell
   $ ssh core@<worker_hostname> "getenforce"
   ```
-  
-  on your helper node. 
-  
+
+  on your helper node.
+
 - Setting the PID limit for a container to at least 8192
-  
+
   You can check the PID limit on the worker nodes by executing
-  
+
 
   ```shell
   $ "crio config 2>/dev/null | grep 'pids_limit'"
@@ -256,9 +257,9 @@ https://docs.openshift.com/container-platform/4.6/post_installation_configuratio
 
 #### Registry setup
 
-- The default route to the internal registry of the Red Hat OpenShift
-  cluster needs to be enabled. For more information see
-  https://docs.openshift.com/container-platform/4.4/registry/configuring-registry-operator.html#registry-operator-default-crd_configuring-registry-operator
+The default route to the internal registry of the Red Hat OpenShift
+cluster needs to be enabled. For more information see
+https://docs.openshift.com/container-platform/4.4/registry/configuring-registry-operator.html#registry-operator-default-crd_configuring-registry-operator
 
 
 #### Project setup
@@ -308,14 +309,14 @@ project proceed as follows:
 
     to generate the file `<ocp-project-name>-service-account.yaml` in
     the root directory of your repository clone.
-  
+
   - Generate the service account by running
 
     ```shell
     $ oc apply -f <ocp-project-name>-service-account.yaml
     ```
 
-  - Now add the required security context constraints to the service account: 
+  - Now add the required security context constraints to the service account:
 
     ```shell
     $ oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:<ocp-project-name>:<ocp-project-name>-sa
@@ -365,7 +366,7 @@ in your configuration file:
   $ tools/verify-config
   ```
 
-## General command line parameters 
+## General command line parameters
 
 The following optional command line parameters are available for all
 scripts in the `tools/` directory of your repository clone:
@@ -373,7 +374,7 @@ scripts in the `tools/` directory of your repository clone:
 - The configuration file to use (default: `./config.yaml`):
 
   ```shell
-  -c / --config-file <configuration file> 
+  -c / --config-file <configuration file>
   ```
 
 - Write logging information to the user's terminal, not into logging
@@ -385,7 +386,7 @@ scripts in the `tools/` directory of your repository clone:
 
 - Write logging information to the specified directory:
 
-  ```shell    
+  ```shell
   -g / --logfile-dir <logfile directory>
   ```
 
@@ -398,7 +399,7 @@ scripts in the `tools/` directory of your repository clone:
 > :warning: **You have to stop the reference database before starting
 > the automated build!**
 
-- Run 
+- Run
 
   ```shell
   $ tools/containerize -a
@@ -411,7 +412,7 @@ scripts in the `tools/` directory of your repository clone:
   takes some time (about 30 minutes in our build setup).
 
 
-## Manual Build
+## Manual build
 
 Manual build involves creating a snapshot copy of the `data/` and `log/`
 directories of the reference database and building the three container
@@ -436,8 +437,8 @@ images. The three images can be built at once or individually.
 
   to create a snapshot copy of the `data/` and `log/` directories of
   your database on the NFS server. Dependent on the size of the
-  database this may take quite some time.
-  
+  database this may take some time.
+
 - The copy is performed via an SSH connection between the NFS server
   and the host on which the `data/` and `log/` directories of your
   reference database reside. Therefore the user which is specified as
@@ -458,23 +459,23 @@ images. The three images can be built at once or individually.
   ```shell
   $ tools/containerize -b
   ```
-  
+
   to build the three images
-  
+
   ```shell
   localhost/soos-init:latest
   localhost/soos-<nws4-sid>:latest
   localhost/soos-<hdb-sid>:latest
   ```
-  
+
   at once where
-  
+
   - `<nws4-sid>` is the SAP system ID of your reference SAP NetWeaver
     or SAP S/4HANA system and
 
   - `<hdb-sid>` is the SAP system ID of your reference database
     system.
-  
+
 - Verify whether the images were correctly built by running
 
   ```shell
@@ -487,7 +488,7 @@ images. The three images can be built at once or individually.
 
 ### Building the container images separately
 
-- Run 
+- Run
 
   ```shell
   $ tools/image-build -f init
@@ -498,7 +499,7 @@ images. The three images can be built at once or individually.
   ```shell
   localhost/soos-init:latest
   ```
-  
+
   Verify whether the image was correctly built by running
 
   ```shell
@@ -507,14 +508,14 @@ images. The three images can be built at once or individually.
   localhost/soos-init   latest   746eb831dc01   18 minutes ago   439 MB
   ```
 
-- Run 
+- Run
 
   ```shell
   $ tools/image-build -f nws4
   ```
 
   from the root directory of your repository clone to build the image
-  
+
   ```shell
   localhost/soos-<nws4-sid>:latest
   ```
@@ -530,7 +531,7 @@ images. The three images can be built at once or individually.
   localhost/soos-<nws4-sid>   latest   d09fdddabbbe   16 minutes ago   5.3 GB
   ```
 
-- Run 
+- Run
 
   ```shell
   $ tools/image-build -f hdb
@@ -566,7 +567,7 @@ cluster you have to push them to the local cluster registry.
   ```
 
   to push the three images to the local cluster registry at once.
-  
+
   Alternatively you can push the three images individually to the
   local cluster registry by running the three commands
 
@@ -604,22 +605,22 @@ three steps:
 
 - Starting the SAP system on the cluster.
 
-#### Creating a database overlay share on the NFS server
+### Creating a database overlay share on the NFS server
 
 - Create a database overlay share on the NFS server by running
-  
+
   ```shell
   $ tools/containerize -o
   ```
-  
+
   or
-  
+
   ```shell
   $ tools/nfs-overlay-setup
   ```
 
   The commands emit the unique ID
-  
+
   ```shell
   <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
   ```
@@ -635,9 +636,9 @@ three steps:
   ```shell
   $ tools/containerize -l
   ```
-  
+
   or
-  
+
   ```shell
   $ tools/nfs-overlay-list
   ```
@@ -649,48 +650,48 @@ three steps:
   <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid> (<date-of-creation> <time-of-creation>)
   ⋮
   ```
-  
+
 - You can tear down an existing NFS overlay share by running
 
   ```shell
   $ tools/containerize -t -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
   ```
-  
+
   or
-  
+
   ```shell
   $ tools/nfs-overlay-teardown -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
   ```
 
-#### Generating a deployment description file
+### Generating a deployment description file
 
 - Generate a deployment description file by running
 
   ```shell
   $ tools/containerize -d -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
   ```
-  
+
   or
 
   ```shell
   $ tools/ocp-deployment-gen -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
   ```
-  
+
   where
   `<uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>` is
   the unique ID of the overlay share which was created in the previous
   step.
-  
+
   Running one of the above mentioned commands generates a deployment
   description file
-  
+
   ```shell
   <ocp-project-name>-deployment-<nws4-sid>-<hdb-sid>.yaml
   ```
-  
+
   in the root directory of your repository clone.
-  
-#### Starting the SAP system on the Red Hat OpenShift cluster
+
+### Starting the SAP system on the Red Hat OpenShift cluster
 
 
 - Start the SAP system on the cluster by running
@@ -718,10 +719,10 @@ three steps:
   Only if the status of the pod is shown as `Running`, the pod is up
   and running. In all other cases the containers may still be in the
   startup phase or an error occurred.
-  
+
 - In general, you can get detailed information about the pod run time
   history by running
-  
+
   ```shell
   $ oc describe pod soos-<nws4-sid>
   ```
@@ -731,13 +732,13 @@ three steps:
   local registry of the worker node, on which the deployment is about
   to start. This process may take several minutes. In this case the
   command
-  
+
   ```shell
   $ oc describe pod soos-<nws4-sid> | grep -i pull
   ```
-  
+
   shows lines containing messages
-  
+
   ```shell
   ⋮
   … Pulling image "image-registry.openshift-image-registry.svc:5000/<ocp-project-name>/soos-init"
@@ -747,32 +748,32 @@ three steps:
   … Pulling image "image-registry.openshift-image-registry.svc:5000/<ocp-project-name>/soos-<nws4-sid>"
   ⋮
   ```
-  
+
   Only if each of these messages is followed by a message
-  
+
 
   ```shell
   … Successfully pulled image "<image-name>"
   ```
 
   all images where successfully copied to the worker node.
-  
-- Run 
-  
+
+- Run
+
   ```shell
   $ oc describe pod soos-<nws4-sid> | grep -i 'Started container'
   ```
 
   to check if the containers of the SAP system where successfully
   started. Only if all four messages
-    
+
   ```shell
   … Started container soos-init
   … Started container soos-<hdb-sid>
   … Started container soos-<nws4-sid>-ascs
   … Started container soos-<nws4-sid>-di
   ```
-  
+
   are displayed the containers of the SAP system where successfully
   started on your cluster.
 
@@ -786,26 +787,26 @@ three steps:
   NAME                 TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)                              AGE
   soos-<nws4-sid>-np   NodePort   172.30.187.181   <none>        32<nws4-di-instno>:<node-port>/TCP   9m9s
   ```
-  
-## Logging into a container 
+
+## Logging into a container
 
 You can easily log into a container of your running SAP system by
 using the command `tools/ocp-container-login`.
 
-- To log into your ASCS container, use 
+- To log into your ASCS container, use
 
   ```shell
   tools/ocp-container-login -f nws4 -i ascs
   ```
-  
-- To log into your DI container, use 
+
+- To log into your DI container, use
 
   ```shell
   tools/ocp-container-login -f nws4 -i di
   ```
-  
 
-- To log into your SAP HANA container, use 
+
+- To log into your SAP HANA container, use
 
    ```shell
    tools/ocp-container-login -f hdb
@@ -822,7 +823,7 @@ To establish a connection to the SAP system proceed as follows:
    ```shell
    tools/ocp-port-forwarding
    ```
-  
+
   The command emits a set of SAP GUI connection parameters
 
    ```shell
@@ -830,7 +831,7 @@ To establish a connection to the SAP system proceed as follows:
    Instance Number     <instno>
    Application Server  <build-machine-name>
    ```
-   
+
   - `<nws4-sid>` is the SAP system ID of your reference SAP NetWeaver
     or SAP S/4HANA system
 
@@ -838,13 +839,13 @@ To establish a connection to the SAP system proceed as follows:
     dialog instance of your reference system. It may differ if the
     required port on the build machine is already taken by another
     application.
-  
+
   - `<build-machine-name>` is the name of your build machine.
 
 - Define a SAP GUI connection using the above parameters and connect
   to your SAP system.
 
-   
+
 ## Testing the images locally
 
 You can use the `tools/container-local` command to start local SAP
@@ -861,7 +862,7 @@ instance containers on your build machine.
   the ID of an overlay share which was created as described in section
   [Creating a database overlay share on the NFS
   server](#creating-a-database-overlay-share-on-the-nfs-server).
-  
+
   The script creates a `./tmp/` directory on the build machine, mounts
   the `data/` and `log/` directories of the overlay share underneath
   the `./tmp/` directory and exposes them to the running
@@ -876,7 +877,7 @@ instance containers on your build machine.
   ```shell
   $ tools/container-local -a start -f nws4 -i ascs
   ```
-  
+
   to start an ASCS instance container.
 
 - Run
@@ -884,13 +885,13 @@ instance containers on your build machine.
   ```shell
   $ tools/container-local -a start -f nws4 -i di
   ```
-  
+
   to start a dialog instance container. Currently it is not yet
   possible to establish a connection from a local dialog instance
   container to the database which is running in a local SAP HANA
   container. Therefore the dialog instance in the dialog instance
   container cannot start completely.
-  
+
 - The three commands presented above emit the name of the started
   container. You can log into a running container by running
 
