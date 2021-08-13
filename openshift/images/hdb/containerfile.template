@@ -1,0 +1,94 @@
+# ------------------------------------------------------------------------
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+FROM registry.access.redhat.com/ubi8/ubi-init:latest
+
+# label
+
+LABEL soos.containerfile.description="{{IMAGE_DESCRIPTION}}" \
+      soos.containerfile.date="{{IMAGE_DATE}}" \
+      soos.containerfile.version="{{IMAGE_VERSION}}" \
+      soos.containerfile.commit="{{IMAGE_COMMIT}}" \
+      soos.containerfile.branch="{{IMAGE_BRANCH}}"
+
+#RUN dnf -y makecache
+
+RUN \
+    # Install packages needed for image build
+    dnf -y install --setopt=install_weak_deps=False util-linux-user && \
+    # Install packages needed for container operation
+    dnf -y install --setopt=install_weak_deps=False csh hostname && \
+    # Install prerequisite packages for running SAP products (SAP Note #2772999)
+    dnf -y install --setopt=install_weak_deps=False uuidd libnsl tcsh psmisc nfs-utils bind-utils && \
+    # Need to be installed for SAP HANA
+    dnf -y install --setopt=install_weak_deps=False expect graphviz iptraf-ng krb5-workstation libatomic libcanberra-gtk2 libibverbs libicu libpng12 libssh2 lm_sensors ncurses numactl PackageKit-gtk3-module xorg-x11-xauth && \
+    # Need to be installed for the "Server" environment group
+    dnf -y install --setopt=install_weak_deps=False cairo libaio krb5-libs net-tools openssl rsyslog sudo xfsprogs && \
+    # Need to be installed for mounting NFS shares for HANA
+    dnf -y install --setopt=install_weak_deps=False nfs-utils
+
+# Install optional packages
+
+{{INSTALL_OPT_PACKAGES}}
+
+{{COPY_OPT_PACKAGE_FILES}}
+{{INSTALL_OPT_PACKAGE_FILES}}
+
+RUN dnf -y clean all
+
+# Create needed users and groups
+
+RUN groupadd --gid {{SAPSYS_GID}} sapsys && \
+    useradd --no-create-home --uid {{SAPADM_UID}} --gid {{SAPSYS_GID}} --comment "{{SAPADM_COMMENT}}" --home-dir {{SAPADM_HOME}} --shell {{SAPADM_SHELL}} sapadm && \
+    useradd --no-create-home --uid {{SIDADM_UID}} --gid {{SAPSYS_GID}} --comment "{{SIDADM_COMMENT}}" --home-dir {{SIDADM_HOME}} --shell {{SIDADM_SHELL}} {{sid}}adm
+
+# Copy HANA system related files
+
+COPY ./etc_services_sap ./etc_security_limits.conf /
+COPY ./etc/pam.d/sapstartsrv /etc/pam.d/sapstartsrv
+COPY ./etc/security/limits.d/99-sapsys.conf /etc/security/limits.d/99-sapsys.conf
+COPY --chown={{SIDADM_UID}}:{{SAPSYS_GID}} .{{USR_SAP_REAL}} {{USR_SAP_REAL}}/
+COPY --chown={{SIDADM_UID}}:{{SAPSYS_GID}} .{{HANA_SHARED_SID}} {{HANA_SHARED_SID}}/
+
+# Copy systemd and HANA license manager related files
+
+COPY ./soos.service /etc/systemd/system/
+COPY ./soos-start.sh ./soos-stop.sh ./soos-hdblcm.tmp /root/
+
+
+# Setup HANA system and and enable required systemd services
+
+RUN {{USR_SAP_LINK_CMD}} && \
+    cat /etc_services_sap >> /etc/services                     && rm /etc_services_sap && \
+    cat /etc_security_limits.conf >> /etc/security/limits.conf && rm /etc_security_limits.conf && \
+    chown root:{{SAPSYS_GID}} /usr/sap {{USR_SAP_REAL}} {{USR_SAP_REAL}}/sapservices && \
+    mkdir -p {{VAR_LIB_HDB_SID}}  && chown {{SIDADM_UID}}:{{SAPSYS_GID}} {{VAR_LIB_HDB_SID}} && \
+    chgrp -R {{SAPSYS_GID}} {{USR_SAP_REAL}}/sapservices  && \
+    chmod +x /root/soos-start.sh    && \
+    chmod +x /root/soos-stop.sh     && \
+    systemctl enable soos           && \
+    systemctl enable uuidd          && \
+    systemctl unmask systemd-logind
+
+# Cleanup
+
+# XXX TBD
+
+# Container startup
+
+# In ubi-init images CMD is /sbin/init by default
+# In ubi images we need to specify a CMD
+#CMD /root/soos-start.sh && tail -f /dev/null

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,66 +18,84 @@
 
 """ Copy an SAP HANA DB snapshot to the NFS server """
 
+
 # Global modules
 
+import logging
 import sys
+
 
 # Local modules
 
-from modules.args     import getCommonArgsParser
+from modules.args     import getCommonArgs
 from modules.command  import CmdSsh
-from modules.config   import getConfig
-from modules.logger   import setupLogging
-from modules.nfsTools import (
+from modules.context  import getContext
+from modules.fail     import fail
+from modules.nfstools import (
     getHdbCopyBase,
     getHdbSubDirs
 )
-from modules.tools    import getNumRunningSapProcs
+from modules.tools    import (
+    getNumRunningSapProcs,
+    getHdbCopySshCommand
+)
+from modules.verify   import Verify
 
 
 # Functions
 
 
-def _getArgs():
-    """ Get command line arguments """
-    parser = getCommonArgsParser(
-        'Copy an SAP HANA DB snapshot the NFS server'
-    )
-
-    return parser.parse_args()
-
-
-def _hdbIsStopped(config):
-    return getNumRunningSapProcs(config, 'hdb') == '0'
-
 # ----------------------------------------------------------------------
-
 
 def _main():
 
-    args = _getArgs()
-    setupLogging(args)
+    ctx = getContext(getCommonArgs(
+        'Copy an SAP HANA DB snapshot the NFS server'
+    ))
 
-    config = getConfig(args.config_file, True)
-    hdbSid = config.flavor.hdb.sid.upper()
-    cmdSsh = CmdSsh(config.nfs.host, config.nfs.user)
+    hdbSid  = ctx.cf.refsys.hdb.sidU
+    hdbHost = ctx.cf.refsys.hdb.host
+    hdbUser = ctx.cr.refsys.hdb.sidadm
 
-    if _hdbIsStopped(config):
-        for subDir in getHdbSubDirs():
-            sourceDir = f"{config.flavor.hdb.user}@{config.flavor.hdb.host}" \
-                        f":{config.flavor.hdb.base}/{subDir}/{hdbSid}/*"
-            targetDir = f"{getHdbCopyBase(config)}/{subDir}/{hdbSid}"
-            cmdSsh.run(f"mkdir -p '{targetDir}'")
-            print(f"Copying '{sourceDir}' to '{targetDir}' on host '{config.nfs.host}'")
-            cmdSsh.run(f"rsync -avr '{sourceDir}' '{targetDir}'")
-    else:
-        print(f"Error: HANA Database '{hdbSid}' is running on host {config.flavor.hdb.host}.\n"
-              f"Stop the database then restart the nfs-hdb-copy step.")
-        sys.exit(1)
+    nfsHost   = ctx.cf.nfs.host
+    nfsUser   = ctx.cr.nfs.user
+    cmdSshNfs = CmdSsh(ctx, nfsHost.name, nfsUser)
+
+    logging.debug('Checking if HDB is stopped')
+
+    # Check if HDB is stopped
+
+    if getNumRunningSapProcs(ctx, 'hdb') != '0':
+        fail(f"Error: HANA Database '{hdbSid}' is running on host {hdbHost.name}.\n"
+             f"Stop the database then restart the nfs-hdb-copy step.")
+
+    # Check if SSH connection from NFS server to HDB server is possible
+
+    if not Verify(ctx).verifyNfsToHdbSshConnection(doPrint=False):
+        fail(f"Cannot establish connection from "
+             f"'{nfsUser.name}@{nfsHost.name}' to ''{hdbUser.name}@{hdbHost.name}''")
+
+    # Copy HDB content
+
+    for subDir in getHdbSubDirs():
+
+        sourceDir = f"{hdbUser.name}@{hdbHost.ip}:{ctx.cf.refsys.hdb.base}/{subDir}/{hdbSid}/*"
+        targetDir = f"{getHdbCopyBase(ctx)}/{subDir}/{hdbSid}"
+
+        cmdSshNfs.run(f'mkdir -p "{targetDir}"')
+
+        rsyncSsh, rsyncSshSecrets = getHdbCopySshCommand(ctx, withLogin=False)
+
+        print(f"Copying '{sourceDir}' to '{targetDir}' on host '{ctx.cf.nfs.host.name}'")
+
+        cmdSshNfs.run(f'rsync -avr -e "{rsyncSsh}" "{sourceDir}" "{targetDir}"', rsyncSshSecrets)
+
 
 # ----------------------------------------------------------------------
 
-
-if __name__ == "__main__":
-    _main()
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

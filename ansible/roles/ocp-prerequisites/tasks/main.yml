@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,24 +14,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- import_tasks: ../../../tasks/oc-user-login.yml
 
-- name: "set oc_project: {{ oc_project_name }}"
+- import_tasks: ../../../tasks/oc-user-login.yml
+  
+- name: "set oc_project: {{ ocp_project_name }}"
   set_fact:
-    oc_project: "{{ oc_project_name }}"
-- name: check if the project "{{ oc_project_name }}" is already existing
+    oc_project: "{{ ocp_project_name }}"
+- name: check if the project "{{ ocp_project_name }}" is already existing
   shell: "oc get projects" 
   register: oc_all_projects
 
-- name: create a new project if "{{ oc_project_name }}" does not exist
-  shell: "oc new-project {{oc_project_name}}"
+- name: create a new project if "{{ ocp_project_name }}" does not exist
+  shell: "oc new-project {{ocp_project_name}}"
   register: outmsg
   when: oc_project not in oc_all_projects.stdout
 - name: show new-project
   debug: var=outmsg
 
 - name: choose your project
-  shell: "oc project {{oc_project_name}}"
+  shell: "oc project {{ocp_project_name}}"
 - name: get service account
   shell: "oc get serviceaccount"
   register: outmsg
@@ -42,7 +43,7 @@
   failed_when: outmsg.rc != 0
 
 - import_tasks: ../../../tasks/oc-admin-login.yml
-
+  
 - name: enable the Image Registry default route, patch the Image Registry Operator
   shell: "oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{\"spec\":{\"defaultRoute\":true}}'"
   register: r_msg
@@ -50,25 +51,49 @@
   debug: var=r_msg
 
 - name: add permission
-  shell: "oc adm policy add-scc-to-group anyuid 'system:serviceaccounts:{{oc_project_name}}'"
+  shell: "oc adm policy add-scc-to-group anyuid 'system:serviceaccounts:{{ocp_project_name}}'"
   register: out_p
 - name: show permission settings
   debug: var=out_p.stdout
 
 - name: generate ocp service-account
-  shell: "{{path_to_ocp_tool}}/tools/ocp-service-account-gen -c {{path_to_ocp_tool}}/config.yaml -o {{path_to_ocp_tool}}/{{oc_project_name}}-service-account.yaml -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-service-account-gen -c ./config.yaml -q ./creds.yaml -o {{path_to_ocp_tool}}/{{ocp_project_name}}-service-account.yaml -w"
   register: out_b
-- name: show where the file {{oc_project_name}}-service-account.yaml is created 
+- name: show where the file {{ocp_project_name}}-service-account.yaml is created 
   debug: var=out_b.stdout
 
-- name: generate the service account {{oc_project_name}}-service-account.yaml
-  shell: "oc apply -f {{path_to_ocp_tool}}/{{oc_project_name}}-service-account.yaml"
+- name: generate the service account {{ocp_project_name}}-service-account.yaml
+  shell: "oc apply -f {{path_to_ocp_tool}}/{{ocp_project_name}}-service-account.yaml"
   register: out_m
 - name: show result after generating the service account
   debug: var=out_m
 
 - name: add the required security context constraints to the service account
-  shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{oc_project_name}}:{{oc_project_name}}-sa"
+  shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{ocp_project_name}}:{{ocp_project_name}}-sa"
   register: out_msg
 - name: show result after add-scc-to-user
   debug: var=out_msg
+  
+# generate secret for Distributed Reference System after OCP project is checked, created
+- import_tasks: generate_ocp_secret.yml
+
+- name: verify configuration settings of config.yaml and creds.yaml
+  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && {{ path_to_ocp_tool }}/tools/verify-config -c {{ path_to_ocp_tool }}/config.yaml -q {{ path_to_ocp_tool }}/creds.yaml -w"
+  register: result_msg
+  ignore_errors: true
+- debug: var=result_msg.stdout_lines
+- name: check failed verify configuration parameters
+  debug: var=result_msg.stderr_lines
+  failed_when: result_msg.rc != 0
+  when: result_msg.rc != 0
+
+# Checking security context constraints, checking worker nodes
+- name: verify ocp settings
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/verify-ocp-settings -c ./config.yaml -q ./creds.yaml -w"
+  register: outmsg
+  ignore_errors: true
+- debug: var=outmsg.stdout_lines
+- name: check failed verify ocp settings
+  debug: var=outmsg.stderr_lines
+  failed_when: outmsg.rc != 0
+  when: outmsg.rc != 0

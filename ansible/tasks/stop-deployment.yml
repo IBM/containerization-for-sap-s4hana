@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 # ------------------------------------------------------------------------
 - import_tasks: oc-user-login.yml
 - name: Stopping deployment on the OCP cluster
-  command: "oc delete -f {{path_to__ocp_tool}}/{{oc_project_name}}-deployment-{{nws4_sid_lower_case}}-{{hdb_sid_deployment}}.yaml"
+  command: "oc delete -f {{path_to_ocp_tool}}/{{ocp_project_name}}-deployment-{{nws4_sid_lower_case}}-{{hdb_sid_deployment}}.yaml"
   register: stop_status
 - debug: var=stop_status
 

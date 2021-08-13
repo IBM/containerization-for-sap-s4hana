@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 # ------------------------------------------------------------------------
 #oc login <cluster URL> -u <user-name> -p <password-name>
 - name: Login as admin to OCP cluster
-  shell: "oc login --insecure-skip-tls-verify=true https://api.{{ocp_cluster_domain}}:6443 -u kubeadmin -p {{admin_psw}}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-login -c ./config.yaml -q ./creds.yaml -a -w"
   register: login_adm
 - name: show login result info
   debug: var=login_adm.stdout

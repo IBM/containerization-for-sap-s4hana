@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,20 +18,31 @@
 
 """ Check coding style of python files """
 
+
 # Global modules
 
+import html
 import logging
 import os
 import sys
+import types
+
 
 # Local modules
 
 from modules.args    import getCommonArgsParser
 from modules.command import CmdShell
-from modules.logger  import setupLogging
+from modules.context import getContext
+from modules.fail    import fail
+from modules.tools   import getExecPath
+
+
+# Constants
+
+MAX_LINE_LENGTH = 100
+
 
 # Classes
-
 
 class _Autopep8:
     """ Execute autopep8 """
@@ -40,32 +51,42 @@ class _Autopep8:
         'E24',   # default ignore
         'W50',   # default ignore
         'W690',  # default ignore
-        'E251',  # don't fix whitespaces for named function parameters
+        'E124',  # don't fix 'closing bracket does not match visual indentation'
         'E221',  # don't fix whitespaces for named function parameters
+        'E222',  # don't fix multiple spaces after operator
+        'E251',  # don't fix whitespaces for named function parameters
         'E271',  # don't remove extraneous whitespace around keywords
         'E272',  # don't remove extraneous whitespace around keywords
     ]
 
-    autopep8 = 'autopep8'
+    autopep8 = getExecPath('autopep8')
+    logging.debug(f"Using '{autopep8}' for 'autopep8'")
     autopep8 += ' --verbose'
     # autopep8 += ' --in-place'
-    autopep8 += ' --max-line-length 100'
+    autopep8 += f' --max-line-length {MAX_LINE_LENGTH+1}'
     autopep8 += ' --ignore ' + ','.join(autopep8Ignores)
 
-    def __init__(self, file, diffTool):
-        # pylint: disable=bad-whitespace
+    def __init__(self, ctx, file):
+        self._ctx      = ctx
         self._file     = file
         self._fileAp8  = f'{file}.ap8'
-        self._diffTool = diffTool
         self._cmdShell = CmdShell()
 
     def run(self):
         """ Execute autopep8 on given file """
-        print(self._cmdShell.run(f'{_Autopep8.autopep8} {self._file} > {self._fileAp8}').err)
+        return self._cmdShell.run(f'{_Autopep8.autopep8} {self._file} > {self._fileAp8}')
 
     def diff(self):
         """ Diff file against autopep8 output """
-        print(self._cmdShell.run(f'{self._diffTool} {self._file} {self._fileAp8}').out)
+
+        res = self._cmdShell.run(f'diff {self._file} {self._fileAp8}')
+
+        if res.rc != 0:
+            # There were differences
+            # Mark all line ends with a '$' to visualize trailing whitespaces
+            res.out = res.out.replace('\n', '$\n')
+
+        return res
 
     def remove(self):
         """ Remove temporary file created by autopep8 """
@@ -76,11 +97,13 @@ class _Pylint:
     """ Execute pylint """
     pylintIgnores = [
         'no-self-use',
-        'too-few-public-methods'
+        'too-few-public-methods',
+        'logging-fstring-interpolation'
     ]
 
-    pylint = 'pylint-3'
-    pylint += ' --logging-format-style=fstr'
+    pylint = getExecPath('pylint')
+    logging.debug(f"Using '{pylint}' for 'pylint'")
+    pylint += f' --max-line-length={MAX_LINE_LENGTH}'
     pylint += ' --function-naming-style=camelCase'
     pylint += ' --argument-naming-style=camelCase'
     pylint += ' --variable-naming-style=camelCase'
@@ -94,10 +117,118 @@ class _Pylint:
     @classmethod
     def run(cls, file):
         """ Execute pylint on given file """
-        print(cls.cmdShell.run(f'{cls.pylint} {file}').out)
+        return cls.cmdShell.run(f'{cls.pylint} {file}')
+
+
+class _Formatter():
+
+    def __init__(self):
+        pass
+
+    def printMsg(self, msg):
+        """ Print a message to stderr """
+        print(msg, file=sys.stderr)
+
+    def addFileHeader(self, path):
+        """ Add header for one file """
+
+    def addIssues(self, kind, issues):
+        """ Add issues of a specific kind """
+
+    def addFileFooter(self):
+        """ Add footer for one file """
+
+    def addStats(self, total, totalOk):
+        """ Add statistcs line """
+
+    def _getStatsMsg(self, total, totalOk):
+        return f'{totalOk} / {total} file(s) passed all checks'
+
+
+class _EmptyFormatter(_Formatter):
+
+    def __str__(self):
+        return ''
+
+    def printMsg(self, msg):
+        pass
+
+
+class _TextFormatter(_Formatter):
+
+    def __init__(self):
+        super().__init__()
+        self._text = ''
+
+    def __str__(self):
+        return f"\n{self._getStepHeader('Codingstyle Report', '#')}{self._text}"
+
+    def addFileHeader(self, path):
+        self._text += self._getStepHeader(f"File '{path}'", '=')
+
+    def addIssues(self, kind, issues):
+        self._text += self._getStepHeader(f'{kind} issues', '-')
+        self._text += f'{issues}\n'
+
+    def addFileFooter(self):
+        pass
+
+    def addStats(self, total, totalOk):
+        self._text += f'\n{self._getStatsMsg(total, totalOk)}\n'
+
+    def _getStepHeader(self, message, headChar):
+        return str(f'{headChar*70}\n'
+                   f'  {message}\n'
+                   f'{headChar*70}\n')
+
+
+class _HtmlFormatter(_Formatter):
+
+    def __init__(self):
+        super().__init__()
+        self._html = ''
+
+    def __str__(self):
+        return self._getHeader() + self._html + self._getFooter()
+
+    def addFileHeader(self, path):
+        self._html +=  '    <details>\n'
+        self._html += f'      <summary>{path}</summary>\n'
+        self._html +=  '      <ul type="none">\n'
+
+    def addIssues(self, kind, issues):
+        self._html +=  '        <li>\n'
+        self._html +=  '          <details>\n'
+        self._html += f'            <summary>{kind} issues</summary>\n'
+        self._html +=  '            <pre>\n'
+        self._html += f'{html.escape(issues)}\n'
+        self._html +=  '            </pre>\n'
+        self._html +=  '          </details>\n'
+        self._html +=  '        </li>\n'
+
+    def addFileFooter(self):
+        self._html +=  '      </ul>\n'
+        self._html +=  '    </details>\n'
+
+    def addStats(self, total, totalOk):
+        self._html += f'    <p>{self._getStatsMsg(total, totalOk)}</p>\n'
+
+    def _getHeader(self):
+        return str('<!DOCTYPE html>\n'
+                   '<html>\n'
+                   '  <head>\n'
+                   '    <meta charset="utf-8">\n'
+                   '    <title>Codingstyle Report</title>\n'
+                   '  </head>\n'
+                   '  <body>\n'
+                   '    <h1>Codingstyle Report</h1>\n')
+
+    def _getFooter(self):
+        return str('  </body>\n'
+                   '</html>\n')
+
 
 # Functions
-
 
 def _getArgs():
     """ Get command line arguments """
@@ -105,22 +236,13 @@ def _getArgs():
         'Check coding style of python files'
     )
 
-    # pylint: disable=bad-whitespace
-
     parser.add_argument(
-        '-s',
-        '--source',
+        'source',
         metavar  = '<source>',
-        required = True,
-        help     = 'Name of file or directory that is to be checked'
+        nargs    = '+',
+        help     = 'Names of files or directories that are to be checked'
     )
-    parser.add_argument(
-        '-i',
-        '--interactive',
-        required = False,
-        action   ='store_true',
-        help     = "Allow manual interaction between check steps"
-    )
+
     parser.add_argument(
         '-r',
         '--recursion-level',
@@ -131,132 +253,187 @@ def _getArgs():
         help     = "Perform recursive check up to depth <recursion-level> "
                    "if <source> is a directory; ('-1': no depth limitation)"
     )
-    diffTools = [
-        'diff -u',  # first entry is default tool
-        'meld'
+
+    formats = [
+        'text',  # first entry is default tool
+        'html',
+        'empty'
     ]
+
     parser.add_argument(
-        '-d',
-        '--difftool',
-        metavar  = '<difftool>',
+        '-f',
+        '--format',
+        metavar  = '<format>',
         required = False,
-        choices  = diffTools,
-        default  = diffTools[0],
-        help     = "Select tool for diffing after autopep8 corrections "
-                   "('"+"', '".join(diffTools)+f"')"
+        choices  = formats,
+        default  = formats[0],
+        help     = "Select output format "
+                   "('"+"', '".join(formats)+"')"
     )
+
     return parser.parse_args()
 
 
-def _printStepHeader(message, headChar):
-    print(headChar*70)
-    print(' ' + message)
-    print(headChar*70)
+def _getFormatter(ctx):
 
+    if ctx.ar.format == 'text':
+        formatter = _TextFormatter()
 
-def _printStepHeader1(message):
-    print()
-    _printStepHeader(message, '=')
+    elif ctx.ar.format == 'html':
+        formatter = _HtmlFormatter()
 
+    elif ctx.ar.format == 'empty':
+        formatter = _EmptyFormatter()
 
-def _printStepHeader2(message):
-    _printStepHeader(message, '-')
+    else:
+        # Should not be reached
+        fail(f"Unexpected format '{ctx.ar.format}'")
 
-
-def _waitForInput():
-    input('Press <Enter> to continue ')
+    return formatter
 
 
 def _ignoreFile(file):
+
     ignoreFile = False
     ignoreFile = ignoreFile or file.endswith('~')
+    ignoreFile = ignoreFile or file.endswith('#')
     ignoreFile = ignoreFile or file.endswith('.ap8')
     ignoreFile = ignoreFile or file.endswith('.backup')
+    ignoreFile = ignoreFile or file.endswith('.new')
+    ignoreFile = ignoreFile or file.endswith('.old')
+
     logging.debug(f"'{file}': returning {ignoreFile}")
+
     return ignoreFile
 
 
 def _ignoreDir(directory):
+
     ignoreDir = False
     ignoreDir = ignoreDir or directory.endswith('__pycache__')
+
     logging.debug(f"'{directory}': returning {ignoreDir}")
+
     return ignoreDir
 
 
 def _isPythonFile(file):
-    isPythonFile = False
-    if file.endswith('.py'):
-        isPythonFile = True
-    else:
-        with open(file, 'r') as fh:  # pylint: disable=invalid-name
-            content = fh.read()
-            isPythonFile = content.startswith('#!/usr/bin/env python3')
-    logging.debug(f"'{file}': returning {isPythonFile}")
-    return isPythonFile
+    return CmdShell().run(f"file --mime --brief '{file}'").out.startswith('text/x-python')
 
 
-def _checkFileOrDir(fileDir, diffTool, recLevel, maxRecLevel, interactive):
+def _checkFileOrDir(ctx, fileDir, recLevel):
+
     if os.path.isfile(fileDir):
         logging.debug(f"'{fileDir}': is file")
-        _checkFile(fileDir, diffTool, interactive)
+        _checkFile(ctx, fileDir)
+
     elif os.path.isdir(fileDir):
         logging.debug(f"'{fileDir}': is directory")
-        _checkDir(fileDir, diffTool, recLevel, maxRecLevel, interactive)
+        _checkDir(ctx, fileDir, recLevel)
+
     else:
         logging.debug(f"'{fileDir}': ignoring")
-        _printStepHeader1(f"'{fileDir}' is neither a file nor a directory - ignoring")
+        ctx.formatter.printMsg(f"'{fileDir}' is neither a file nor a directory - ignoring")
 
 
-def _checkDir(directory, diffTool, recLevel, maxRecLevel, interactive):
+def _checkDir(ctx, directory, recLevel):
+
     if _ignoreDir(directory):
-        _printStepHeader1(f"Ignoring directory '{directory}'")
+        ctx.formatter.printMsg(f"Ignoring directory '{directory}'")
         return
+
+    maxRecLevel = ctx.ar.recursion_level
 
     if recLevel <= maxRecLevel or maxRecLevel == -1:
-        _printStepHeader1(f"Checking directory '{directory}'")
+        ctx.formatter.printMsg(f"Checking directory '{directory}'")
         for file in os.listdir(directory):
-            _checkFileOrDir(f'{directory}/{file}', diffTool, recLevel+1, maxRecLevel, interactive)
+            _checkFileOrDir(ctx, f'{directory}/{file}', recLevel+1)
+
     else:
-        _printStepHeader1(f"Not descending into directory '{directory}'")
+        ctx.formatter.printMsg(f"Not descending into directory '{directory}'")
 
 
-def _checkFile(file, diffTool, interactive):
-    if _ignoreFile(file) or not _isPythonFile(file):
-        _printStepHeader1(f"Ignoring file '{file}'")
+def _checkFile(ctx, file):
+
+    if any(file == f.path for f in ctx.files):
+        ctx.formatter.printMsg(f"Ignoring file '{file}' (already visited)")
         return
 
-    _printStepHeader1(f"Checking file '{file}'")
+    checkedFile = types.SimpleNamespace()
+    checkedFile.path = file
+    checkedFile.ignored = True
 
-    autopep8 = _Autopep8(file, diffTool)
+    ctx.files.append(checkedFile)
 
-    _printStepHeader2(f"Running autopep8 on '{file}'")
-    autopep8.run()
+    if _ignoreFile(file) or not _isPythonFile(file):
+        ctx.formatter.printMsg(f"Ignoring file '{file}'")
+        return
 
-    _printStepHeader2(f"Diffing '{file}' against autopep8 output")
-    autopep8.diff()
+    checkedFile.ignored = False
 
-    if interactive:
-        _waitForInput()
+    ctx.formatter.printMsg(f"Checking file '{file}'")
 
-    _printStepHeader2(f"Running pylint on '{file}'")
-    _Pylint.run(file)
+    autopep8 = _Autopep8(ctx, file)
 
-    if interactive:
-        _waitForInput()
+    checkedFile.ap8Run = autopep8.run()
+    checkedFile.ap8Diff = autopep8.diff()
+    checkedFile.pylint = _Pylint.run(file)
 
     autopep8.remove()
 
 
+# ----------------------------------------------------------------------
+
 def _main():
-    args = _getArgs()
 
-    setupLogging(args)
+    ctx = getContext(_getArgs(), withCreds=False, withConfig=False)
 
-    _checkFileOrDir(args.source, args.difftool, 0, args.recursion_level, args.interactive)
+    ctx.files     = []
+    ctx.formatter = _getFormatter(ctx)
+
+    ctx.formatter.printMsg('')
+
+    for source in ctx.ar.source:
+        _checkFileOrDir(ctx, source, 0)
+
+    total   = 0
+    totalOk = 0
+
+    for file in ctx.files:
+
+        if file.ignored or (file.ap8Diff.rc == 0 and file.pylint.rc == 0):
+            if not file.ignored:
+                total   += 1
+                totalOk += 1
+            continue
+
+        # When we are here issues were found in file
+
+        total += 1
+
+        ctx.formatter.addFileHeader(file.path)
+
+        if file.ap8Diff.rc != 0:
+            ctx.formatter.addIssues('autopep8', file.ap8Diff.out)
+
+        if file.pylint.rc != 0:
+            ctx.formatter.addIssues('pylint', file.pylint.out)
+
+        ctx.formatter.addFileFooter()
+
+    ctx.formatter.addStats(total, totalOk)
+
+    print(ctx.formatter)
+
+    if totalOk != total:
+        sys.exit(1)
+
 
 # ----------------------------------------------------------------------
 
-
-if __name__ == "__main__":
-    _main()
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

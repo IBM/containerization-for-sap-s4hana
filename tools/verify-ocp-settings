@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,186 +18,47 @@
 
 """ Verify OpenShift cluster setup related settings """
 
+
 # Global modules
 
-import logging
 import sys
-import types
+
 
 # Local modules
 
-from modules.args    import (
-    getCommonArgsParser,
-    addArgHelperUser
-)
-from modules.command import CmdShell
-from modules.config  import getConfig
-from modules.logger  import setupLogging
-from modules.tools   import getOcLoginCmd
-
-# Functions
-
-
-def _getArgs():
-    """ Get command line arguments """
-    parser = getCommonArgsParser(
-        'Verify OpenShift cluster setup related settings'
-    )
-
-    addArgHelperUser(parser, False)
-
-    # pylint: disable=bad-whitespace
-
-    parser.add_argument(
-        '--cluster-admin',
-        metavar  = '<cluster-admin>',
-        required = False,
-        default  = 'kubeadmin',
-        help     = 'OpenShift cluster administrator user name'
-    )
-    parser.add_argument(
-        '--cluster-admin-pwd',
-        metavar  = '<cluster-admin-pwd>',
-        required = True,
-        help     = 'Password of <cluster-admin>'
-    )
-
-    return parser.parse_args()
-
-
-def _ocAdminLogin(ocp):
-    CmdShell().run(getOcLoginCmd(ocp))
-
-
-def _getWorkerNodes():
-    return CmdShell().run(
-        'oc get nodes'
-        + ' --selector="node-role.kubernetes.io/worker"'
-        + " -o template --template '{{range .items}}{{.metadata.name}}{{"+r'"\n"'+"}}{{end}}'"
-    ).out.split()
-
-
-def _checkSeLinux(args, config, worker):
-    enforceState = _runSshJumpCmd(args, config, worker, 'getenforce')
-    if enforceState in ('Permissive', 'Disabled'):
-        print(f"SELinux setting '{enforceState}' matches requirements.")
-        checkOk = True
-    else:
-        print(f"ERROR: Invalid SELinux setting '{enforceState}'"
-              f"- set to 'Permissive' or 'Disabled'.")
-        checkOk = False
-    return checkOk
-
-
-def _checkPidLimit(args, config, worker):
-    pidsLimit = _runSshJumpCmd(args, config, worker, 'crio config | grep pids_limit')
-    pidsLimit = int(pidsLimit.split('=')[1])
-    if pidsLimit >= 8192:
-        print(f'CRI-O pids_limit setting {pidsLimit} matches requirements.')
-        checkOk = True
-    else:
-        print(f'ERROR: CRI-O pids_limit setting {pidsLimit} is too low, must be >= 8192.')
-        checkOk = False
-    return checkOk
-
-
-def _checkOcpProject(ocp):
-    out = CmdShell().run(
-        'oc get scc anyuid'
-        " -o template --template='{{range .groups}}{{.}}{{"+r'"\n"'+"}}{{end}}'"
-    ).out.split()
-    logging.debug(f'out: {out}')
-    if f'system:serviceaccounts:{ocp.project}' in out:
-        print(f"Security Context Constraint 'anyuid' is set for project '{ocp.project}'")
-        checkOk = True
-    else:
-        print(f"ERROR: Project '{ocp.project}' does not have "
-              f"the 'anyuid' Security Context Constraint permission.\n"
-              f'       Logon as kube:admin and execute:\n\n'
-              f'         oc adm policy add-scc-to-group anyuid'
-              f' "system:serviceaccounts:{ocp.project}"\n')
-        checkOk = False
-    return checkOk
-
-
-def _checkOcpServiceAccount(ocp):
-    out = CmdShell().run(
-        'oc get scc hostmount-anyuid'
-        " -o template --template='{{range .users}}{{.}}{{"+r'"\n"'+"}}{{end}}'"
-    ).out.split()
-    if f'system:serviceaccount:{ocp.project}:{ocp.project}-sa' in out:
-        print(f"Security Context Constraint 'hostmount-anyuid'"
-              f"is set for service account '{ocp.project}-sa'")
-        checkOk = True
-    else:
-        print(f'ERROR: Service account {ocp.project}-sa does not have '
-              f"the 'hostmount-anyuid' Security Context Constraint.\n"
-              f'       Logon as kube:admin, create the service account and execute:\n\n'
-              f'         oc adm policy add-scc-to-user hostmount-anyuid'
-              f' "system:serviceaccount:{ocp.project}:{ocp.project}-sa"\n')
-        checkOk = False
-    return checkOk
-
-
-def _runSshJumpCmd(args, config, worker, cmd):
-    return CmdShell().run(
-        f'ssh {args.helper_user}@{config.ocp.helperHost} "ssh core@{worker} {cmd}"'
-    ).out
+from modules.args    import getCommonArgs
+from modules.context import getContext
+from modules.verify  import VerifyOcp
+from modules.fail    import fail
 
 
 # ----------------------------------------------------------------------
-
 
 def _main():
 
-    args = _getArgs()
-
-    setupLogging(args)
-
-    config = getConfig(args.config_file, True)
-
-    ocp = types.SimpleNamespace(**{
-        'domain':    config.ocp.domain,
-        'user':      args.cluster_admin,
-        'password':  args.cluster_admin_pwd,
-        'project':   config.ocp.project
-    })
-
-    _ocAdminLogin(ocp)
-
-    checkOk = True
+    ctx = getContext(getCommonArgs(
+        'Verify OpenShift cluster setup related settings'
+    ))
 
     # Check settings for OpenShift project and service account
 
-    print('--'*35)
-    print('- Checking security context constraints')
-    print('--'*35)
+    print('-'*72)
+    print('Verifying OpenShift Cluster Setup related settings')
+    print('-'*72)
 
-    checkOk = _checkOcpProject(ocp) and checkOk
-    checkOk = _checkOcpServiceAccount(ocp) and checkOk
+    if not VerifyOcp(ctx).verify():
+        print('-'*72)
+        fail('VERIFICATION ERRORS OCCURED - SEE ABOVE MESSAGES FOR MORE DETAILS\n')
 
-    # Check settings on worker nodes
+    print('-'*72)
+    print('Verification successful.\n')
 
-    print('--'*35)
-    print('- Checking worker nodes')
-    print('--'*35)
 
-    for worker in _getWorkerNodes():
-        print('- '*35)
-        print(f"-- Worker node '{worker}'")
-        print('- '*35)
-        checkOk = _checkSeLinux(args, config, worker) and checkOk
-        checkOk = _checkPidLimit(args, config, worker) and checkOk
-
-    print()
-    if checkOk:
-        print('Verification successful.')
-    else:
-        print('VERIFICATION ERRORS OCCURED - SEE ABOVE MESSAGES FOR MORE DETAILS.')
-    print()
 # ----------------------------------------------------------------------
 
-
 if __name__ == '__main__':
-    _main()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@
 
 """ Tear down overlay file system on NFS server """
 
+
 # Global modules
 
 import sys
+
 
 # Local modules
 
@@ -28,17 +30,11 @@ from modules.args     import (
     getCommonArgsParser,
     addArgOverlayUuid,
 )
-from modules.command  import CmdSsh
-from modules.config   import getConfig
-from modules.logger   import setupLogging
-from modules.nfsTools import (
-    getHdbSubDirs,
-    getOverlayDirs
-)
+from modules.context  import getContext
+from modules.nfstools import Overlays
 
 
 # Functions
-
 
 def _getArgs():
     """ Get command line arguments """
@@ -50,38 +46,25 @@ def _getArgs():
 
     return parser.parse_args()
 
-# ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
 
 def _main():
 
-    args = _getArgs()
+    ctx = getContext(_getArgs())
 
-    setupLogging(args)
+    overlay = Overlays(ctx).find(ctx.ar.overlay_uuid)
 
-    config = getConfig(args.config_file, True)
+    print(f"Deleting overlay share '{overlay}'")
 
-    cmdSsh = CmdSsh(config.nfs.host, config.nfs.user)
+    overlay.delete()
 
-    # Remove the entries for the overlay file systems from /etc/exports
-
-    cmdSsh.run(f'sed -i.backup -e "/.*{args.overlay_uuid}.*/d" /etc/exports')
-
-    # Remove the overlay file systems from the table of exported NFS file systems
-
-    cmdSsh.run('exportfs -ar')
-
-    # Tear down all overlay file systems
-
-    for subDir in getHdbSubDirs():
-        ovld = getOverlayDirs(config, subDir, args.overlay_uuid)
-        cmdSsh.run(f'umount {ovld.merged}')
-        cmdSsh.run(f'rm -rf {ovld.base}/{subDir}*/* 2>/dev/null')
-        cmdSsh.run(f'rmdir -p {ovld.base}/{subDir}* 2>/dev/null')
 
 # ----------------------------------------------------------------------
 
-
-if __name__ == "__main__":
-    _main()
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)
