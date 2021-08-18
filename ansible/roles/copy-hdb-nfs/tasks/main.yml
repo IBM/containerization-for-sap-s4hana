@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: create a snapshot copy of the SAP HANA on the NFS server
-  shell: "{{path_to_ocp_tool}}/tools/nfs-hdb-copy -c {{path_to_ocp_tool}}/config.yaml -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/nfs-hdb-copy -c ./config.yaml -q ./creds.yaml -w"
   register: outmsg
 - name: show status of copy hdb 
   debug: var=outmsg.stdout

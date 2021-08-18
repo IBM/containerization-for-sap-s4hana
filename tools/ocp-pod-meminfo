@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Get SAP system memory consumption information """
+
+
+# Global modules
+
+import logging
+import math
+import sys
+import time
+
+
+# Local modules
+
+
+from modules.args    import (
+    getCommonArgsParser,
+    addCommonArgsString
+)
+from modules.context import getContext
+from modules.ocp     import (
+    containerRun,
+    getContainerName
+)
+from modules.quantity import Quantity
+from modules.tools    import getTimestamp
+
+
+# Functions
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Get SAP system memory consumption information'
+    )
+
+    parser.add_argument(
+        '-l',
+        '--loop',
+        required = False,
+        action   = 'store_true',
+        help     = "Print information in endless loop"
+    )
+
+    parser.add_argument(
+        '-t',
+        '--sleep-time',
+        metavar  = '<sleep-time>',
+        required = False,
+        type     = int,
+        default  = 5,
+        help     = "Sleep time in seconds between two loop executions"
+    )
+
+    return parser.parse_args()
+
+
+def _getMeminfoGiB(ctx, instance):
+    # Returns a float, may return math.nan
+
+    containerName = getContainerName(ctx, instance)
+    meminfoCmd    = "cat /sys/fs/cgroup/memory/memory.usage_in_bytes"
+
+    res = containerRun(ctx, containerName, meminfoCmd)
+
+    if res.rc != 0:
+        logging.debug(f"Execution of command '{meminfoCmd}' in container '{containerName}'"
+                      f" returned rc {res.rc} (reason: {res.err})")
+
+    try:
+        memUsage = float(res.out.strip())/(1024**3)
+    except ValueError:
+        memUsage = math.nan
+
+    return memUsage
+
+
+def _getLimitGiB(ctx, instance):
+    # Returns an int
+
+    limit = getattr(ctx.cf.ocp.containers, instance).resources.limits.memory
+
+    # Scale the limit value to GiB
+
+    return Quantity(limit).valueIntScaled("Gi")
+
+
+def _printResult(instance, memUsage, limit, percentage):
+    # memUsage and percentage might be math.nan, if  a problem occurred
+    # during containerRun() in function _getMeminfoGiB()
+
+    limitStr      = f'{limit:4.1f}'
+    memUsageStr   = f'{memUsage:6.3f}'   if not math.isnan(memUsage)   else '     ?'
+    percentageStr = f'{percentage:4.2f}' if not math.isnan(percentage) else '    ?'
+    print(f'{instance.upper():10} {memUsageStr:7} {limitStr:5} {percentageStr}')
+
+
+# ----------------------------------------------------------------------
+
+def _main():
+
+    ctx = getContext(_getArgs())
+
+    addCommonArgsString(ctx)
+
+    instances = ctx.config.getContainerFlavors()
+    instances.remove('init')
+
+    while True:
+        print(getTimestamp(withDecorator=True))
+
+        print('             Used Limit   Used')
+        print('Container     GiB   GiB      %')
+        print('-'*30)
+
+        for instance in instances:
+            memUsage = _getMeminfoGiB(ctx, instance)
+            limit    = _getLimitGiB(ctx, instance)
+            _printResult(instance, memUsage, limit, memUsage * 100 / limit)
+
+        if ctx.ar.loop:
+            time.sleep(ctx.ar.sleep_time)
+        else:
+            break
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
+    sys.exit(0)

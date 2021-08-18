@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 
 """ SSH port forwarding for creating a SAP GUI connection to the containerized SAP system """
 
+
 # Global modules
 
 import logging
@@ -25,119 +26,184 @@ import os
 import socket
 import sys
 
+
 # Local modules
 
-from modules.args    import (
-    getCommonArgsParser,
-    addArgHelperUser
-)
+from modules.args    import getCommonArgs
 from modules.command import CmdShell
-from modules.config  import getConfig
-from modules.logger  import setupLogging
-from modules.tools   import ocLogin
+from modules.context import getContext
+from modules.fail    import fail
+from modules.ocp     import (
+    getWorkerIp,
+    ocLogin
+)
+from modules.tools   import strBold
+
 
 # Functions
 
-
-def _getArgs():
-    """ Get command line arguments """
-    parser = getCommonArgsParser(
-        'SSH port forwarding for creating a SAP GUI connection to the containerized SAP system'
-    )
-
-    addArgHelperUser(parser, False)
-
-    return parser.parse_args()
-
-
-def _getWorkerIp(config):
-    """ Get the cluster IP address of the worker node on which the SAP system is running """
+def _getNodePortList(ctx):
+    """ Get the node ports on the worker node which can be used to connect to the SAP system """
     return CmdShell().run(
-        'oc get pods'
-        + f' --selector="app=soos-{config.flavor.nws4.sid.lower()}"'
-        + ' -o template --template "{{range .items}}{{.status.hostIP}}{{end}}"'
+        f'oc get service soos-{ctx.cf.refsys.nws4.sidL}-np'
+        + ' -o template --template "{{range .spec.ports}}{{.name}}:{{.nodePort}},{{end}}"'
     ).out
-
-
-def _getNodePort(config):
-    """ Get the node port on the worker node which can be used to connect to the SAP system """
-    return CmdShell().run(
-        f'oc get service soos-{config.flavor.nws4.sid.lower()}-np'
-        + ' -o template --template "{{range .spec.ports}}{{.nodePort}}{{end}}"'
-    ).out
-
-
-def _getHelperIp(config):
-    """ Get the intranet IP address of the helper node which serves as gateway into the cluster """
-    return socket.gethostbyname(config.ocp.helperHost)
 
 
 def _portInUse(port):
     """ Check whether local port is in use """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sck:
         inUse = sck.connect_ex(('localhost', port)) == 0
-        logging.debug(f'inUse: >>>{inUse}<<<')
+        logging.debug(f'   >>> Port {port} is in use: {inUse} <<<')
         return inUse
 
 
-def _findFreePort(minPort, maxPort):
-    """ Find free local port in given port range """
-    port = minPort
-    while port <= maxPort:
-        if not _portInUse(port):
-            return port
-        port += 1
-    return None
+def _searchFreeInstno(instno, portList, reservedList):
+    """ Find a free effective Instance Number by checking for free ports """
+    # Argument portList is a list containing the required ports,
+    # where xx is an replacement for the SAP instance number
+    # Argument reservedList is an additional check for ports that shall be reserved
+
+    freeInstNo = -1
+    freePorts  = []
+    instnoMin = int(instno)
+    instnoMax = int(instno) + 100
+    for i in range(instnoMin, instnoMax):
+        for portStr in portList:
+            port = int(portStr.replace('xx', f'{i % 100:02d}'))
+            if port not in reservedList and not _portInUse(port):
+                freePorts.append(port)
+            else:
+                freePorts = []
+                break
+
+        if freePorts:
+            freeInstNo = i
+            break
+
+    if freePorts:
+        logging.debug(f'>>> InstNo {freeInstNo:02d} is free: Port List {freePorts} <<<')
+    else:
+        logging.debug('>>> There is no free instNo in the range available ! <<<')
+
+    return freeInstNo, freePorts
+
+
+def _addSshForwardArgs(portList, nodePortList, workerIp):
+    """ Compile argument list for SSH command """
+    forwardArgs = []
+    host = socket.gethostname()
+    for i, port in enumerate(portList):
+        logging.debug(f'>>> prepare forwarding from {host}.{port} '
+                      f'to {workerIp}:{nodePortList[i]} <<<')
+        forwardArgs.extend(['-L', f'{port}:{workerIp}:{nodePortList[i]}'])
+    return forwardArgs
 
 
 # ----------------------------------------------------------------------
 
-
 def _main():
-    """ Main function """
 
-    args = _getArgs()
+    # pylint: disable=too-many-locals
 
-    setupLogging(args)
+    ctx = getContext(getCommonArgs(
+        'SSH port forwarding for creating a SAP GUI connection to the containerized SAP system'
+    ))
 
-    config = getConfig(args.config_file, True)
+    ocLogin(ctx, ctx.cr.ocp.user)
 
-    ocLogin(config)
+    workerIp   = getWorkerIp(ctx)
+    helperUser = ctx.cr.ocp.helper.user.name
+    helperIp   = ctx.cf.ocp.helper.host.ip
+    diInstno   = ctx.cf.refsys.nws4.di.instno
+    hdbInstno  = ctx.cf.refsys.hdb.instno
 
-    diInstNo = config.flavor.nws4.di.instNo
-    workerIp = _getWorkerIp(config)
-    nodePort = _getNodePort(config)
-    helperUser = args.helper_user
-    helperIp = _getHelperIp(config)
+    logging.debug(f'   >>> Got Instno: diInstno {ctx.cf.refsys.nws4.di.instno} '
+                  f'hdbInstno {ctx.cf.refsys.hdb.instno} <<<')
+    sep1 = '-'*40
+    sep2 = '.'*63
 
-    portBase = 3200
+    sshCommand = ['ssh', '-N', '-g']
 
-    localPort = portBase+int(diInstNo)
+    diPort = []
+    diNodePort = []
+    hdbPort = []
+    hdbNodePort = []
 
-    if _portInUse(localPort):
-        localPort = _findFreePort(portBase, portBase+99)
-        if not localPort:
-            print('Cannot find a free local port to bind to', file=sys.stderr)
-            sys.exit(1)
+    logging.debug('>>> Analyze NodePortList: <<<')
+    for i in _getNodePortList(ctx).split(','):
+        # Fetch Name and NodePort fields from "oc get service" output
+        #
+        # Name needs to be of form <instance>-<port pattern> with instance di or hdb,
+        # in the port pattern xx will be replaced with an "effective" SAP Instno
+        #
+        # in _getNodePortList Name and NodePort pairs are separated by :
+        # and multiple Name:NodePort tuples are separated by ,
+        logging.debug(f'   >>> Got element: {i} <<<')
+        elem = i.split(':')
 
-    diInstNo = f'{localPort-portBase:02d}'
+        if i.startswith("di"):
+            diPort.append(elem[0].split('-')[1])
+            diNodePort.append(elem[1])
+        elif i.startswith("hdb"):
+            hdbPort.append(elem[0].split('-')[1])
+            hdbNodePort.append(elem[1])
 
-    sep = '-'*40
-    print(f'\nEstablishing port forwarding to SAP system'
-          f" '{config.flavor.nws4.sid}' in cluster '{config.ocp.domain}'\n\n"
-          f'Use the following parameters to create a SAP GUI connection:\n\n'
-          f'{sep}\n'
-          f'   System ID           {config.flavor.nws4.sid}\n'
-          f'   Instance Number     {diInstNo}\n'
-          f'   Application Server  {socket.gethostname()}\n'
-          f'{sep}\n')
+    if diPort:
+        diInstno, diPort = _searchFreeInstno(diInstno, diPort, [])
+        if diInstno != -1:
+            sshCommand.extend(_addSshForwardArgs(diPort, diNodePort, workerIp))
 
-    os.execlp('ssh', 'ssh', '-N', '-g', '-L',
-              f'32{diInstNo}:{workerIp}:{nodePort}', f'{helperUser}@{helperIp}')
+            print(f'\nEstablishing port forwarding to SAP system'
+                  f" '{ctx.cf.refsys.nws4.sidU}' in cluster '{ctx.cf.ocp.domain}'\n\n"
+                  f'Use the following parameters to create a SAP GUI connection:\n\n'
+                  f'{sep1}\n'
+                  f'   System ID           {ctx.cf.refsys.nws4.sidU}\n'
+                  f'   Instance Number     {diInstno:02d}\n'
+                  f'   Application Server  {socket.gethostname()}\n'
+                  f'{sep1}')
+        else:
+            fail('Cannot find free local ports for the SAP DI to bind to')
 
-    # ----------------------------------------------------------------------
+    if hdbPort:
+        hdbInstno, hdbPort = _searchFreeInstno(hdbInstno, hdbPort, diPort)
+        if hdbInstno != -1:
+            sshCommand.extend(_addSshForwardArgs(hdbPort, hdbNodePort, workerIp))
 
+            mapHdbHost = 'map_' + ctx.cf.refsys.hdb.host.name
+
+            print(f'\nUse the following parameters to create a HANA Studio connection:\n\n'
+                  f'{sep1}\n'
+                  f'   Host Name           {socket.gethostname()}\n'
+                  f'   Instance Number     {hdbInstno:02d}\n'
+                  f'   System ID           {ctx.cf.refsys.hdb.sidU}\n'
+                  f'{sep1}\n'
+                  f'{sep2}\nTo connect to the {strBold("tenant DB")}'
+                  f' with {strBold("SAP HANA Studio")} it is required\n'
+                  f'to set a new entry in the SAP HANA DB parameter {strBold("global.ini")} file\n'
+                  f'In section {strBold("public_hostname_resolution")}:\n'
+                  f'    - Ensure Key: {strBold("use_default_route")}'
+                  f' has  value {strBold("ip")} (default)\n'
+                  f'    - Add    Key: {strBold(mapHdbHost)}'
+                  f'{" ":{len("use_default_route")-len(mapHdbHost)}s}'
+                  f' with value {strBold(helperIp)}\n'
+                  f'Use scope {strBold("System")} for the parameter change\n{sep2}')
+        else:
+            fail('Cannot find free local ports for the SAP HANA DB to bind to')
+
+    if diPort or hdbPort:
+        sshCommand.extend([f'{helperUser}@{helperIp}'])
+        logging.debug(f'>>> execute {sshCommand[0]} with args {sshCommand} <<<')
+        os.execlp(sshCommand[0], *sshCommand)
+    else:
+        fail('Could not identify any port to be forwarded')
+
+
+# ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    _main()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

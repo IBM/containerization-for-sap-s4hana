@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,26 +18,24 @@
 
 """ Push a container image of a given flavor to the internal cluster registry """
 
+
 # Global modules
 
 import sys
+
 
 # Local modules
 
 from modules.args    import (
     getCommonArgsParser,
-    addArgFlavor
+    addArgImageFlavor
 )
 from modules.command import CmdShell
-from modules.config  import getConfig
-from modules.logger  import setupLogging
-from modules.tools   import (
-    ocLogin,
-    podmanOcpRegistryLogin
-)
+from modules.context import getContext
+from modules.ocp     import podmanOcpRegistryLogin
+
 
 # Functions
-
 
 def _getArgs():
     """ Get command line arguments """
@@ -45,44 +43,42 @@ def _getArgs():
         'Push a container image of a given flavor to the internal cluster registry'
     )
 
-    addArgFlavor(parser)
+    addArgImageFlavor(parser)
 
     return parser.parse_args()
 
 
-def _tagImage(config, flavor):
-    names = getattr(config.flavor, flavor).imageNames
+def _tagImage(ctx, flavor):
+    names = getattr(ctx.cf.images, flavor).names
     CmdShell().run(f'podman tag {names.local} {names.ocp}')
 
 
-def _pushImage(config, flavor):
-    names = getattr(config.flavor, flavor).imageNames
+def _pushImage(ctx, flavor):
+    names = getattr(ctx.cf.images, flavor).names
     cmd = 'podman push'
     cmd += ' --tls-verify=false'
     cmd += f' {names.ocp}'
     CmdShell().run(cmd)
 
-# ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
 
 def _main():
 
-    args = _getArgs()
+    ctx = getContext(_getArgs())
 
-    setupLogging(args, args.flavor)
+    podmanOcpRegistryLogin(ctx)
 
-    config = getConfig(args.config_file, True)
+    _tagImage(ctx, ctx.ar.image_flavor)
 
-    ocLogin(config)
-    podmanOcpRegistryLogin(config)
+    _pushImage(ctx, ctx.ar.image_flavor)
 
-    _tagImage(config, args.flavor)
-
-    _pushImage(config, args.flavor)
 
 # ----------------------------------------------------------------------
 
-
-if __name__ == "__main__":
-    _main()
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

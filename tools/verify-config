@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,58 +16,49 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 
-""" Verify settings in configuration YAML file """
+""" Verify parameter settings in configuration YAML file """
+
 
 # Global modules
 
 import sys
 
+
 # Local modules
 
-from modules.args   import getCommonArgs
-from modules.config import getConfig
-from modules.logger import setupLogging
-from modules.verify import (
-    verifyOcp,
-    verifyNfs,
-    verifyNws4,
-    verifyHdb,
-    verifySAPSystem,
-    verifySshConnection
-)
+from modules.args    import getCommonArgs
+from modules.context import getContext
+from modules.fail    import fail
+from modules.verify  import Verify
+
+
+# Functions
+
 
 # ----------------------------------------------------------------------
-
 
 def _main():
 
-    args = getCommonArgs()
+    ctx = getContext(getCommonArgs(
+        'Verify parameter settings in configuration YAML file'
+    ))
+    print('-'*72)
+    print(f"Verifying configuration parameters in file '{ctx.ar.config_file}'")
+    print('-'*72)
 
-    setupLogging(args)
+    if not Verify(ctx).verify():
+        print('-'*72)
+        fail('VERIFICATION ERRORS OCCURED - SEE ABOVE MESSAGES FOR MORE DETAILS\n')
 
-    config = getConfig(args.config_file, True)
+    print('-'*72)
+    print('Verification successful.\n')
 
-    print(f"Verifying configuration parameters")
-
-    success = verifyOcp(config.ocp)
-    success = verifyNws4(config.flavor.nws4) and success
-    success = verifyHdb(config.flavor.hdb)   and success
-    success = verifyNfs(config.nfs)          and success
-    success = verifySAPSystem(config)        and success
-    success = verifySshConnection(config)    and success
-
-    if not success:
-        print('Verifying configuration parameters: '
-              'error(s) in configuration file.\n'
-              'See previous messages for detailed information.')
-        sys.exit(1)
-    else:
-        print('Verifying configuration parameters: '
-              'configuration file successfully verified.')
 
 # ----------------------------------------------------------------------
 
-
 if __name__ == '__main__':
-    _main()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

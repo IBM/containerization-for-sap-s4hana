@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Get SAP system status """
+
+
+# Global modules
+
+import collections
+import logging
+import re
+import sys
+import types
+import time
+
+
+# Local modules
+
+from modules.args    import (
+    addCommonArgsString,
+    getCommonArgsParser
+)
+from modules.context  import getContext
+from modules.nestedns import objToNestedNs
+from modules.ocp      import (
+    containerRun,
+    getContainerName
+)
+from modules.tools    import getTimestamp
+
+
+# Functions
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Get SAP system status'
+    )
+
+    parser.add_argument(
+        '-l',
+        '--loop',
+        required = False,
+        action   = 'store_true',
+        help     = "Print information in endless loop"
+    )
+
+    parser.add_argument(
+        '-t',
+        '--sleep-time',
+        metavar  = '<sleep-time>',
+        required = False,
+        type     = int,
+        default  = 5,
+        help     = "Sleep time in seconds between two loop executions"
+    )
+
+    parser.add_argument(
+        '--process-list',
+        required = False,
+        action   = 'store_true',
+        help     = "Print the process list for every container"
+    )
+
+    return parser.parse_args()
+
+
+def _getStatus(ctx, instance, sidadm, instno):
+    # pylint: disable=too-many-locals
+
+    class _LocalEx(Exception):
+        pass
+
+    try:
+        containerName = getContainerName(ctx, instance)
+
+        sapctrlCmd = f'sapcontrol -nr {instno} -function GetProcessList -format script'
+        statusCmd  = f"su - {sidadm} -c '{sapctrlCmd}'"
+
+        rcOk = (0, 3)  # Even if sapcontrol exits with rc==3 the result seems to be ok
+
+        res = containerRun(ctx, containerName, statusCmd, rcOk=rcOk)
+
+        if res.rc not in rcOk:
+            raise _LocalEx(f"Execution of command '{statusCmd}"
+                           f" in container '{containerName}' failed")
+
+        lines = [line.strip() for line in res.out.split('\n')]
+
+        # Output of 'sapcontrol -nr {instno} -function GetProcessList -format script'
+        # looks as follows (without prefix '[xx] '; lines [04]-[10] are repeated for
+        # each process where the index at the beginning of the line is incremented for
+        # each new process):
+        #
+        # [01] 09.08.2021 11:36:32
+        # [02] GetProcessList
+        # [03] OK
+        # [04] 0 name: disp+work
+        # [05] 0 description: Dispatcher
+        # [06] 0 dispstatus: GREEN
+        # [07] 0 textstatus: Running
+        # [08] 0 starttime: 2021 08 05 18:30:46
+        # [09] 0 elapsedtime: 89:05:46
+        # [10] 0 pid: 1623
+        # ...
+
+        if len(lines) < 3:
+            raise _LocalEx(f"Execution of command '{statusCmd} delivered truncated output")
+
+        funcStatus = lines[2]
+
+        if funcStatus != 'OK':
+            raise _LocalEx("'sapcontrol -function GetProcessList'"
+                           f" failed with status '{funcStatus}'")
+
+        status = collections.OrderedDict()
+
+        for line in lines[3:]:
+            match = re.match(r'(\d+)\s+([a-z]+):\s*(.*)?', line)
+            if match:
+                i = int(match.group(1))
+                if i not in status.keys():
+                    status[i] = {}
+                status[i][match.group(2)] = match.group(3)
+            else:
+                logging.warning(f"Found unexpected line '{line}'")
+
+        status = [types.SimpleNamespace(**v) for (k, v) in status.items()]
+
+    except _LocalEx as ex:
+        status = []
+        msg = f"Could not get status for instance '{instance}'"
+        logging.debug(f'{msg} (reason: {ex})')
+        # print(msg)
+
+    logging.debug(f'status >>>{status}<<<')
+
+    return status
+
+
+def _printStatus(ctx, instance, sidadm, instno):
+    status = _getStatus(ctx, instance, sidadm, instno)
+
+    if ctx.ar.process_list:
+        print('='*40 + f' {instance.upper():4} ' + '='*40)
+        _printProcesslist(status)
+
+    else:
+        _printContainerStatus(instance, status)
+
+
+def _printProcesslist(status):
+
+    if not status:
+        print('Could not get status')
+        return
+
+    cols = objToNestedNs([
+        {
+            'key':   'name',
+            'label': 'Name',
+            'width':  '20.20'
+        }, {
+            'key':   'description',
+            'label': 'Description',
+            'width':  '20.20'
+        }, {
+            'key':   'textstatus',
+            'label': 'Status',
+            'width':  '12.12'
+        }, {
+            'key':   'starttime',
+            'label': 'Started',
+            'width':  '20.20'
+        }, {
+            'key':   'elapsedtime',
+            'label': 'Elapsed',
+            'width':  '20.20'
+        }
+    ])
+
+    # pylint: disable=no-member
+
+    print(' '.join([f'{col.label:{col.width}}' for col in cols]))
+
+    for proc in status:
+        _enhanceProcessStatus(proc)
+        print(' '.join([f'{getattr(proc, col.key):{col.width}}' for col in cols]))
+
+
+def _enhanceProcessStatus(proc):
+    if proc.starttime == '':
+        proc.starttime = 'n/a'
+    else:
+        # Format date (2021 07 21 => 2021-07-21)
+        proc.starttime = proc.starttime.replace(' ', '-', 2)
+
+    if proc.elapsedtime == '':
+        proc.elapsedtime = 'n/a'
+
+
+def _printContainerStatus(instance, status):
+    instance = instance.upper()
+
+    if not status:
+        print(_getContainerStatusLine(instance, 'could not get status'))
+
+    elif all(proc.textstatus == "Running" for proc in status):
+        print(_getContainerStatusLine(instance, 'running'))
+
+    else:
+        print(_getContainerStatusLine(instance, 'not all processes running'))
+
+
+def _getContainerStatusLine(instance, status):
+    return f'{instance:{len("Instance")}}  {status}'
+
+
+# ----------------------------------------------------------------------
+
+def _main():
+
+    ctx = getContext(_getArgs())
+
+    addCommonArgsString(ctx)
+
+    instances = ctx.config.getContainerFlavors()
+    instances.remove('init')
+
+    while True:
+        print(getTimestamp(withDecorator=True))
+
+        if not ctx.ar.process_list:
+            print(_getContainerStatusLine('Instance',  'Status'))
+            print('-'*len(_getContainerStatusLine('', 'not all processes running')))
+
+        for instance in instances:
+
+            if instance in ('ascs', 'di'):
+                sidadm = ctx.cr.refsys.nws4.sidadm.name
+                instno = getattr(ctx.cf.refsys.nws4, instance).instno
+
+            elif instance == 'hdb':
+                sidadm = ctx.cr.refsys.hdb.sidadm.name
+                instno = ctx.cf.refsys.hdb.instno
+
+            _printStatus(ctx, instance, sidadm, instno)
+
+        if ctx.ar.loop:
+            time.sleep(ctx.ar.sleep_time)
+        else:
+            break
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
+    sys.exit(0)

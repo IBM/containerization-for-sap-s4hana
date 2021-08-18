@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Generate a GPG private / public key pair """
+
+
+# Global modules
+
+import getpass
+import os
+import pwd
+import socket
+import sys
+
+import gnupg
+
+
+# Local modules
+
+from modules.args    import getCommonArgs
+from modules.context import getContext
+from modules.logger  import logging
+
+
+# Functions
+
+
+# ----------------------------------------------------------------------
+
+def _main():
+
+    getContext(getCommonArgs(
+        'Generate a GPG private / public key pair'
+    ), withCreds=False, withConfig=False)
+
+    user  = getpass.getuser()
+    host  = socket.gethostname()
+    gecos = pwd.getpwnam(user).pw_gecos
+
+    recipient = f'{user}@{host}'
+
+    gpg = gnupg.GPG()
+
+    logging.getLogger("gnupg").setLevel(logging.ERROR)
+
+    # Set gpg tty to make console pinentry reliably working
+
+    try:
+        # os.ttyname() fails when we are not running interactivly
+        os.environ['GPG_TTY'] = os.ttyname(sys.stdin.fileno())
+    except OSError:
+        logging.info('Not setting GPG_TTY environment variable')
+
+    # Generate the key
+
+    key = gpg.gen_key(gpg.gen_key_input(
+        key_type     = 'RSA',
+        key_length   = 3072,
+        name_real    = gecos,
+        name_comment = 'GPG key for SAP on OCP',
+        name_email   = recipient
+    ))
+
+    print(f"\nGenerated GPG private / public key pair for recipient '{recipient}'\n\n"
+          f"Run\n\n"
+          f"    gpg --list-keys\n\n"
+          f"to list your GPG keys.\n\n"
+          f"Run\n\n"
+          f"    KEY={key}\n"
+          f"    gpg --delete-secret-key ${{KEY}} && gpg --delete-key ${{KEY}}\n\n"
+          f"to remove the secret and public key from your keyring\n")
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
+    sys.exit(0)

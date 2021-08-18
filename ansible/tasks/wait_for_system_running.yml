@@ -1,0 +1,23 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+- name: verify system status every 30 seconds and maximum 30 minutes or until stdout contains string "running"
+  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && {{path_to_ocp_tool}}/tools/sap-system-status -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml"
+  register: outmsg
+  ignore_errors: yes
+  until: (outmsg.stdout | regex_findall('  running') | length) == 3
+  retries: 60
+  delay: 30

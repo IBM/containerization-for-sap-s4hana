@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,34 +16,56 @@
 
 """ Command line argument handling """
 
+
 # Global modules
 
 import argparse
 
+
 # Functions
 
-# pylint: disable=bad-whitespace
 
+# Args parser
 
-def getCommonArgsParser(description=""):
-    """ Get parser for common CLI  arguments """
+def getCommonArgsParser(description=''):
+    """ Get parser for common CLI arguments """
     parser = argparse.ArgumentParser(
         description     = description,
         formatter_class = argparse.ArgumentDefaultsHelpFormatter
     )
 
+    addArgConfigFile(parser)     # -c
+    addArgCredsFile(parser)      # -q
+    addArgLogFileDir(parser)     # -g
     addArgLogLevel(parser)       # -v
     addArgLogToTerminal(parser)  # -w
-    addArgLogFileDir(parser)     # -g
-    addArgConfigFile(parser)     # -c
+    addArgDumpContext(parser)    # <no short switch>
 
     return parser
 
 
-def getCommonArgs(description=""):
+def getCommonArgs(description=''):
     """ Get common CLI arguments """
     return getCommonArgsParser(description).parse_args()
 
+
+def addCommonArgsString(ctx):
+    """ Add string of all common CLI arguments including current values to context """
+
+    ctx.ar.commonArgsStr = ''
+    ctx.ar.commonArgsStr += f' -c {ctx.ar.config_file}'
+    ctx.ar.commonArgsStr += f' -q {ctx.ar.creds_file}'
+    ctx.ar.commonArgsStr += f' -g {ctx.ar.logfile_dir}'
+    ctx.ar.commonArgsStr += f' -v {ctx.ar.loglevel}'
+
+    if ctx.ar.log_to_terminal:
+        ctx.ar.commonArgsStr += ' -w'
+
+    if ctx.ar.dump_context:
+        ctx.ar.commonArgsStr += ' --dump-context'
+
+
+# Common Args, used in all tools
 
 def addArgConfigFile(argsParser):
     """ Argument: Configuration file """
@@ -57,63 +79,15 @@ def addArgConfigFile(argsParser):
     )
 
 
-def addArgFlavor(argsParser, choices=('init', 'nws4', 'hdb'), required=False):
-    """ Argument: Flavor of image file """
+def addArgCredsFile(argsParser):
+    """ Argument: Credentials file """
     argsParser.add_argument(
-        '-f',
-        '--flavor',
-        metavar  = '<flavor>',
-        required = required,
-        choices  = choices,
-        default  = choices[0],
-        help     = "Flavor of image file ('"+"', '".join(choices)+"')"
-    )
-
-
-def addArgNws4InstanceType(argsParser, choices=('di', 'ascs'), required=False):
-    """ Argument: Instance type for flavor 'nws4' """
-    argsParser.add_argument(
-        '-i',
-        '--nws4-instance-type',
-        metavar  = '<nws4_instance_type>',
-        required = required,
-        choices  = choices,
-        default  = choices[0],
-        help     = "Instance type for flavor 'nws4' ('"+"', '".join(choices)+"')"
-    )
-
-
-def addArgOutputFile(argsParser, default):
-    """ Argument: Output file """
-    argsParser.add_argument(
-        '-o',
-        '--output-file',
-        metavar  = '<output-file>',
+        '-q',
+        '--creds-file',
+        metavar  = '<creds-file>',
         required = False,
-        default  = default,
-        help     = "Path to output file"
-    )
-
-
-def addArgLogToTerminal(argsParser):
-    """ Argument: Flag to enable logging to terminal instead of logging to file  """
-    argsParser.add_argument(
-        '-w',
-        '--log-to-terminal',
-        required = False,
-        action   ='store_true',
-        help     = "Log to terminal instead of logging to file"
-    )
-
-
-def addArgOverlayUuid(argsParser, required=True):
-    """ Argument: Overlay share unique ID """
-    argsParser.add_argument(
-        '-u',
-        '--overlay-uuid',
-        metavar  = '<overlay-uuid>',
-        required = required,
-        help     = "UUID of the overlay NFS share on which the HANA DB data resides"
+        default  = './creds.yaml.gpg',
+        help     = 'Credentials file (encrypted)'
     )
 
 
@@ -154,12 +128,73 @@ def addArgLogLevel(argsParser):
     )
 
 
-def addArgHelperUser(argsParser, required=False):
+def addArgLogToTerminal(argsParser):
+    """ Argument: Flag to enable logging to terminal instead of logging to file  """
+    argsParser.add_argument(
+        '-w',
+        '--log-to-terminal',
+        required = False,
+        action   ='store_true',
+        help     = "Log to terminal instead of logging to file"
+    )
+
+
+def addArgDumpContext(argsParser):
+    """ Argument: Dump context (CLI arguments, configuration, credentials) """
+    argsParser.add_argument(
+        '--dump-context',
+        required = False,
+        action   ='store_true',
+        help     = "Dump context (CLI arguments, configuration, credentials)"
+    )
+
+
+# Non-common args, used in multiple tools
+
+def addArgContainerFlavor(argsParser, choices=('di', 'ascs', 'hdb'), required=False):
+    """ Argument: Container flavor """
+    argsParser.add_argument(
+        '-i',
+        '--container-flavor',
+        metavar  = '<container-flavor>',
+        required = required,
+        choices  = choices,
+        default  = choices[0],
+        help     = "Container flavor ('"+"', '".join(choices)+"')"
+    )
+
+
+def addArgImageFlavor(argsParser, choices=('init', 'nws4', 'hdb'), required=False):
+    """ Argument: Image flavor """
+    argsParser.add_argument(
+        '-f',
+        '--image-flavor',
+        metavar  = '<image-flavor>',
+        required = required,
+        choices  = choices,
+        default  = choices[0],
+        help     = "Image flavor ('"+"', '".join(choices)+"')"
+    )
+
+
+def addArgOutputFile(argsParser, default):
+    """ Argument: Output file """
+    argsParser.add_argument(
+        '-o',
+        '--output-file',
+        metavar  = '<output-file>',
+        required = False,
+        default  = default,
+        help     = "Path to output file"
+    )
+
+
+def addArgOverlayUuid(argsParser, required=True):
     """ Argument: Overlay share unique ID """
     argsParser.add_argument(
-        '--helper-user',
-        metavar  = '<helper-user>',
+        '-u',
+        '--overlay-uuid',
+        metavar  = '<overlay-uuid>',
         required = required,
-        default  = 'root',
-        help     = 'Name of user used for login on helper node'
+        help     = "UUID of the overlay NFS share on which the HANA DB data resides"
     )

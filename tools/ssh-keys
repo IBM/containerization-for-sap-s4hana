@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Add/remove SSH public keys to/from the various authorized_keys files """
+
+
+# Global modules
+
+import logging
+import sys
+
+
+# Local modules
+
+from modules.args     import getCommonArgsParser
+from modules.context  import getContext
+from modules.fail     import fail
+from modules.nestedns import objToNestedNs
+from modules.ssh      import (
+    AuthorizedKeys,
+    getPublicKey
+)
+from modules.tools    import (
+    getBuildHost,
+    getBuildUser,
+    helperIsBuild,
+    helperIsNfs
+)
+
+
+# Functions
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Add/remove SSH public keys to/from the various authorized_keys files'
+    )
+
+    parser.add_argument(
+        '-a',
+        '--add-keys',
+        required = False,
+        action   = 'store_true',
+        help     = "Add SSH public keys to the various authorized_keys files"
+    )
+
+    parser.add_argument(
+        '-d',
+        '--display-details',
+        required = False,
+        action   = 'store_true',
+        help     = "Display detailed information on which keys are added/removed to"
+                   " the various authorized_keys files of which users"
+    )
+
+    parser.add_argument(
+        '-r',
+        '--remove-keys',
+        required = False,
+        action   = 'store_true',
+        help     = "Remove SSH public keys from the various authorized_keys files"
+    )
+
+    parser.add_argument(
+        '-y',
+        '--no-confirm',
+        required = False,
+        action   = 'store_true',
+        help     = "Don't confirm adding/removing keys to/from the various authorized_keys files"
+    )
+
+    return parser.parse_args()
+
+
+def _displayDetails(targets):
+
+    authKeysPath = '~/.ssh/authorized_keys'
+
+    sepLine = '-'*75
+
+    print(
+        "\n",
+        sepLine,
+        f"\n"
+        f"\n"
+        f"  In general, the following key(s) are added to/removed from\n"
+        f"  the authorized_keys files of the respective users:\n"
+        f"\n"
+        f"    File: <refsys.nws4.sidadm>@<refsys.nws4.host>:{authKeysPath}\n"
+        f"    Keys: <build.user.sshid>.pub\n"
+        f"    When: always\n"
+        f"\n"
+        f"    File: <refsys.hdb.sidadm>@<refsys.hdb.host>:{authKeysPath}\n"
+        f"    Keys: <build.user.sshid>.pub,\n"
+        f"          <nfs.user>@<nfs.host>:<nfs.user.name.sshid>.pub\n"
+        f"    When: always\n"
+        f"\n"
+        f"    File: <ocp.helper.user>@<ocp.helper.host>:{authKeysPath}\n"
+        f"    Keys: <build.user.sshid>.pub\n"
+        f"    When: only if the helper host is not the build machine\n"
+        f"\n"
+        f"    File: <nfs.user>@<nfs.host>:{authKeysPath}\n"
+        f"    Keys: <build.user.sshid>.pub\n"
+        f"    When: only if the helper host is not the NFS server\n"
+        f"\n"
+        f"  Remarks:\n"
+        f"\n"
+        f"  - User specifications refer to the definitions in the credentials file\n"
+        f"    (derived from file 'creds.yaml.template')\n"
+        f"\n"
+        f"  - Host specifications refer to the definitions in the configuration\n"
+        f"    file (derived from file 'config.yaml.template')\n"
+        f"\n"
+        f"  - If the respective '.sshid' property is not set in the credentials file\n"
+        f"    the public key 'id_rsa.pub' will be added/removed as default\n"
+        f"\n"
+        f"  - If a key is already present in the target authorized_keys file it\n"
+        f"    will not be added another time to avoid duplicate entries\n"
+        f"\n"
+        f"  - If a key is present multiple times in the target authorized_keys\n"
+        f"    file all occurrences of the key will be removed\n"
+        f"\n",
+        sepLine,
+        "\n"
+        "\n"
+        "  In your setup the following keys will be added to/removed from\n"
+        "  the authorized_keys files of the respective users:\n",
+        sep=''
+    )
+
+    for target in targets:
+        keys = ",\n          ".join(str(k.info) for k in target.keys)
+        print(f'    File: {target.user.name}@{target.hname}:{authKeysPath}')
+        print(f'    Keys: {keys}\n')
+
+    print(f'{sepLine}\n')
+
+
+def _addOrRemove(ctx, target, maxUserFullLen):
+
+    userFull = f'{target.user.name}@{target.hname}'
+
+    # Read authorized_keys file of target.user.name@target.hname
+
+    authKeys = AuthorizedKeys(ctx, target.hname, target.user)
+
+    # Add/remove the keys
+
+    numKeysBefore = authKeys.numKeys()
+
+    if ctx.ar.add_keys:
+        action = ['add', 'to']
+        changedKeys = authKeys.add(target.keys)
+
+    elif ctx.ar.remove_keys:
+        action = ['remov', 'from']
+        changedKeys = authKeys.remove(target.keys)
+
+    else:
+        # This should not happen
+        fail(f"No action specified for user '{userFull}'")
+
+    logging.debug(f'authKeys >>>\n{authKeys}\n<<< authKeys')
+
+    # Write modified authorized_keys file
+
+    writeRequired = authKeys.numKeys() != numKeysBefore
+    doWrite       = True
+    confirm       = not ctx.ar.no_confirm
+
+    if writeRequired and confirm:
+        # Ask for confirmation
+
+        print(f'\nThe following key(s) will be'
+              f" {action[0]}ed {action[1]} the authorized_keys file of user '{userFull}':")
+
+        for key in changedKeys:
+            print(f'\n{key}')
+
+        while True:
+            answer = input('\nConfirm action (y/n): ')
+            if answer in ['y', 'n', 'Y', 'N']:
+                break
+
+        doWrite = answer in ['y', 'Y']
+
+        print()
+
+    print(f'• {userFull:<{maxUserFullLen}} - ', end='')
+
+    if writeRequired and doWrite:
+        print(f'{action[0]}ing')
+        authKeys.write()
+
+    else:
+        print('no change')
+
+
+# ----------------------------------------------------------------------
+
+def _main():
+
+    ctx = getContext(_getArgs())
+
+    # Get public keys that need to be added/removed to/from the various authorized_keys files
+
+    pubKeyLocal = getPublicKey(ctx, getBuildHost().name, getBuildUser(ctx))
+    pubKeyNfs   = getPublicKey(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
+
+    # Add/remove the public keys to/from the various authorized_keys files
+
+    targets = []
+
+    # NWS4 <sid>adm
+
+    targets.append({
+        'hname':  ctx.cf.refsys.nws4.host.name,
+        'user':   ctx.cr.refsys.nws4.sidadm,
+        'keys':   [pubKeyLocal]
+    })
+
+    # HDB <sid>adm
+
+    targets.append({
+        'hname':  ctx.cf.refsys.hdb.host.name,
+        'user':   ctx.cr.refsys.hdb.sidadm,
+        'keys':   [pubKeyLocal, pubKeyNfs]
+    })
+
+    # HELPER user
+
+    if not helperIsBuild(ctx):
+        # Only add/remove keys to/from the helper user if we are not building on the helper
+        targets.append({
+            'hname': ctx.cf.ocp.helper.host.name,
+            'user':  ctx.cr.ocp.helper.user,
+            'keys':  [pubKeyLocal]
+        })
+
+    # NFS server user
+
+    if not helperIsNfs(ctx):
+        # Only add/remove keys to/from the NFS server user if we are not hosting NFS on the helper
+        targets.append({
+            'hname':  ctx.cf.nfs.host.name,
+            'user':   ctx.cr.nfs.user,
+            'keys':   [pubKeyLocal]
+        })
+
+    targets = objToNestedNs(targets)
+
+    if ctx.ar.add_keys:
+        action = 'Add'
+
+    elif ctx.ar.remove_keys:
+        action = 'Remov'
+
+    elif ctx.ar.display_details:
+        _displayDetails(targets)
+        return
+
+    else:
+        fail("Specify exactly one of '-a' or '-r' ('-h' for help, '-d' for detailed information)")
+
+    print(f'\n{action}ing keys\n')
+
+    maxUserFullLen = max([len(f'{t.user.name}@{t.hname}') for t in targets])
+
+    for target in targets:
+        _addOrRemove(ctx, target, maxUserFullLen)
+
+    print()
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
+    sys.exit(0)
