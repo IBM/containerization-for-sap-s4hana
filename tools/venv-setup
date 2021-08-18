@@ -1,0 +1,127 @@
+#!/bin/bash
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+# Set up a virtual Python environment with all modules
+# required to run the tools in directory tools/
+
+set -euo pipefail
+
+if [ $# -ge 1 ]; then
+    echo
+    echo "$0:"
+    echo
+    echo "  Set up a virtual Python environment with all modules"
+    echo "  required to run the tools in directory tools/"
+    echo
+    echo "Doesn't require any command line arguments"
+    echo
+    exit 1
+fi
+
+# Check OS version
+
+major () { echo ${1%.*}; }
+minor () { echo ${1#*.}; }
+
+MIN_RHEL="8.2"
+
+source /etc/os-release  # Sets ${ID} and ${VERSION_ID}
+
+if [ ${ID} == "rhel" ]; then
+    if [ $(major ${VERSION_ID}) -lt $(major ${MIN_RHEL}) \
+	   -o    $(major ${VERSION_ID}) -eq $(major ${MIN_RHEL}) \
+	      -a $(minor ${VERSION_ID}) -lt $(minor ${MIN_RHEL}) ]; then
+	echo "Minimal required RHEL version to run this script: ${MIN_RHEL}"
+	exit 1
+    fi
+fi
+
+# Ensure required RPM packages on OS level are installed
+
+echo
+echo "Checking / installing required RPM packages"
+echo
+
+PKG_REQ=""
+PKG_REQ="${PKG_REQ} python38"
+
+PKG_INST=""
+
+for PKG in ${PKG_REQ}; do
+    echo -n "${PKG} - "
+    if dnf list installed ${PKG} >/dev/null 2>&1; then
+	echo "installed"
+    else
+	echo "missing"
+	PKG_INST="${PKG_INST} ${PKG}"
+    fi
+done
+
+if [ -n "${PKG_INST}" ]; then
+    INSTALL_CMD="dnf install -y ${PKG_INST}"
+
+    if [ $(id -u) != 0 ]; then
+	echo "Provide root user password for installing package(s)${PKG_INST}"
+	su root -c "${INSTALL_CMD}"
+    else
+	${INSTALL_CMD}
+    fi
+fi
+
+# Set up the virtual environment
+
+echo
+echo "Setting up virtual environment"
+echo
+
+PYTHON="/usr/bin/env python3.8"
+VENV="$(pwd)/venv"
+
+${PYTHON} -m venv "${VENV}"
+source ${VENV}/bin/activate
+
+pip install --upgrade pip
+
+MODULES=""
+MODULES="${MODULES} autopep8"      # tools/codingstyle only
+MODULES="${MODULES} pyaml"
+MODULES="${MODULES} pylint"        # tools/codingstyle only
+MODULES="${MODULES} python-gnupg"
+MODULES="${MODULES} termcolor"
+
+pip install --no-cache-dir ${MODULES}
+
+SEP='------------------------------------------------------------------------'
+
+echo ${SEP}
+echo
+echo ' Setup of virtual python environment finished.'
+echo
+echo ' Execute'
+echo
+echo '     source ./venv/bin/activate'
+echo
+echo ' to activate the virtual environment'
+echo
+echo ' Execute'
+echo
+echo '     deactivate'
+echo
+echo ' inside the virtual environment to deactivate the environment.'
+echo
+echo ${SEP}

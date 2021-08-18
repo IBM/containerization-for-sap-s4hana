@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: creating HANA DB overlay share on the NFS server
-  command: "{{path_to_ocp_tool}}/tools/nfs-overlay-setup -c {{path_to_ocp_tool}}/config.yaml"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/nfs-overlay-setup -c ./config.yaml -q ./creds.yaml"
   register: uuid_status
 - debug: var=uuid_status.stdout
 - name: store uuid for the deployment file
   set_fact: 
     uuid_value: "{{ uuid_status.stdout }}"
-    deployment_file: "{{ oc_project_name }}-deployment-{{ nws4_sid_lower_case }}-{{ hdb_sid_deployment }}.yaml"
+    deployment_file: "{{ ocp_project_name }}-deployment-{{ nws4_sid_lower_case }}-{{ hdb_sid_deployment }}.yaml"
 

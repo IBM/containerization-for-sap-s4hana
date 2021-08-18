@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,24 +18,35 @@
 
 """ Generate OpenShift deployment YAML file """
 
+
 # Global modules
 
 import sys
+import yaml
+
 
 # Local modules
 
-from modules.args     import (
+from modules.args       import (
     getCommonArgsParser,
     addArgOutputFile,
     addArgOverlayUuid
 )
-from modules.config   import getConfig
-from modules.logger   import setupLogging
-from modules.nfsTools import getOverlayBase
-from modules.tools    import genFileFromTemplate
+from modules.context    import getContext
+from modules.nfstools   import (
+    getOverlayBase,
+    Overlays
+)
+from modules.tools      import (
+    instantiateYamlTemplate,
+    refSystemIsStandard,
+    areContainerMemResourcesValid
+)
+from modules.messages   import getMessage
+from modules.fail       import fail
+
 
 # Functions
-
 
 def _getArgs():
     """ Get command line arguments """
@@ -48,106 +59,190 @@ def _getArgs():
 
     return parser.parse_args()
 
-# ----------------------------------------------------------------------
+
+def _areOcpMemoryResourcesValid(ctx):
+    success = True
+    for containerType in _getOcpContainerTypes(ctx):
+        if containerType == 'init':
+            continue
+        if areContainerMemResourcesValid(ctx.cf.ocp, containerType):
+            continue
+
+        containers = getattr(ctx.cf.ocp.containers, containerType)
+        limits     = containers.resources.limits.memory
+        requests   = containers.resources.requests.memory
+        print(getMessage("msgE002", limits, requests, containerType))
+        success = False
+    return success
 
 
-def _main():
+def _getOcpContainerTypes(ctx):
+    return list(ctx.cf.ocp.containers.__dict__)
 
-    args = _getArgs()
 
-    setupLogging(args)
+def _getParms(ctx):
 
-    config = getConfig(args.config_file, True)
+    # Get the full UUID of the NFS overlay share
 
-    params = {
+    overlayUuid = Overlays(ctx).find(ctx.ar.overlay_uuid).uuid
+
+    return {
         # The OCP project name
-        'PROJECT': config.ocp.project,
+        'PROJECT': ctx.cf.ocp.project,
 
         # OCP deployment name
-        'DEPLOYMENT_NAME': config.flavor.nws4.imageNames.short,
+        'DEPLOYMENT_NAME': ctx.cf.images.nws4.names.short,
 
         # Last part of the init image repository name
-        'INIT_IMAGE_NAME_SHORT': config.flavor.init.imageNames.short,
+        'INIT_IMAGE_NAME_SHORT': ctx.cf.images.init.names.short,
 
         # Last part of the NWS4 image repository name
-        'NWS4_IMAGE_NAME_SHORT': config.flavor.nws4.imageNames.short,
+        'NWS4_IMAGE_NAME_SHORT': ctx.cf.images.nws4.names.short,
 
         # Last part of the HDB image repository name
-        'HDB_IMAGE_NAME_SHORT': config.flavor.hdb.imageNames.short,
+        'HDB_IMAGE_NAME_SHORT': ctx.cf.images.hdb.names.short,
 
         # Name of the ASCS container
-        'NWS4_ASCS_CONTAINER_NAME': config.flavor.nws4.ascs.containerName,
+        'NWS4_ASCS_CONTAINER_NAME': ctx.cf.ocp.containers.ascs.name,
 
         # Name of the DI container
-        'NWS4_DI_CONTAINER_NAME': config.flavor.nws4.di.containerName,
+        'NWS4_DI_CONTAINER_NAME': ctx.cf.ocp.containers.di.name,
 
         # Name of the HDB container
-        'HDB_CONTAINER_NAME': config.flavor.hdb.containerName,
+        'HDB_CONTAINER_NAME': ctx.cf.ocp.containers.hdb.name,
 
         # Name of the service account
-        'SERVICE_ACCOUNT_NAME': config.ocp.serviceAccountName,
+        'SERVICE_ACCOUNT_NAME': ctx.cf.ocp.sa.name,
 
         # --- Parameters for NWS4 Image ---
 
         # SAPSID of the Netweaver S/4 SAP System
-        'NWS4_SAPSID': config.flavor.nws4.sid.upper(),
+        'NWS4_SAPSID': ctx.cf.refsys.nws4.sidU,
 
         # Host name of the original Netweaver S/4 SAP System
-        'NWS4_PQHN': config.flavor.nws4.host,
+        'NWS4_PQHN': ctx.cf.refsys.nws4.host.name,
 
         # Domain name of the original Netweaver S/4 SAP System
-        'NWS4_FQHN': config.flavor.nws4.sapfqdn,
+        'NWS4_FQHN': ctx.cf.refsys.nws4.sapfqdn,
 
         # -- Parameters for ASCS Instance ---
 
         # Instance number of the Netweaver S/4 SAP System ASCS Instance
-        'NWS4_ASCS_INSTNO': config.flavor.nws4.ascs.instNo,
+        'NWS4_ASCS_INSTNO': ctx.cf.refsys.nws4.ascs.instno,
+
         # Profile name of ASCS Instance, optional. If empty, default is used
-        'NWS4_ASCS_PROFILE': config.flavor.nws4.ascs.profileName,
+        'NWS4_ASCS_PROFILE': ctx.cf.refsys.nws4.ascs.profile,
+
+        # Memory request for ASCS container
+        'ASCS_REQUESTS_MEMORY': ctx.cf.ocp.containers.ascs.resources.requests.memory,
+
+        # Memory limit for ASCS container
+        'ASCS_LIMITS_MEMORY': ctx.cf.ocp.containers.ascs.resources.limits.memory,
 
         # -- Parameters for DI Instance --
 
         # Instance number of the Netweaver S/4 SAP System Dialog Instance
-        'NWS4_DI_INSTNO': config.flavor.nws4.di.instNo,
+        'NWS4_DI_INSTNO': ctx.cf.refsys.nws4.di.instno,
 
         # Profile name of DI Instance, optional. If empty, default is used
-        'NWS4_DI_PROFILE': config.flavor.nws4.di.profileName,
+        'NWS4_DI_PROFILE': ctx.cf.refsys.nws4.di.profile,
+
+        # Secret name
+        'NWS4_DI_DBCREDENTIALS_SECRET': ctx.cf.ocp.containers.di.secret,
+
+        # Memory request for DI container
+        'DI_REQUESTS_MEMORY': ctx.cf.ocp.containers.di.resources.requests.memory,
+
+        # Memory limit for DI container
+        'DI_LIMITS_MEMORY': ctx.cf.ocp.containers.di.resources.limits.memory,
 
         # --- Parameters for HDB Image ---
 
+        # Rename HDB Host
+        'HDB_RENAME_HOST': ctx.cf.refsys.hdb.rename,
+
         # SAPSID of the HANA DB System
-        'HDB_SAPSID': config.flavor.hdb.sid.upper(),
+        'HDB_SAPSID': ctx.cf.refsys.hdb.sidU,
 
         # Instance number of the HANA DB System
-        'HDB_INSTNO': config.flavor.hdb.instNo,
+        'HDB_INSTNO': ctx.cf.refsys.hdb.instno,
 
         # Host name of the original HANA DB System
-        'HDB_PQHN': config.flavor.hdb.host,
+        'HDB_PQHN': ctx.cf.refsys.hdb.host.name,
+
+        # Host name of the target HANA DB System
+        'HDB_TARGET_HOST': ctx.cf.refsys.nws4.host.name,
 
         # Directory under which directories {data,log} of the HANA DB system are located
-        'HDB_BASE': config.flavor.hdb.base,
+        'HDB_BASE': ctx.cf.refsys.hdb.base,
+
+        # Memory request for HDB container
+        'HDB_REQUESTS_MEMORY': ctx.cf.ocp.containers.hdb.resources.requests.memory,
+
+        # Memory limit for HDB container
+        'HDB_LIMITS_MEMORY': ctx.cf.ocp.containers.hdb.resources.limits.memory,
 
         # -- Parameters for mounting HANA DB database file systems --
 
         # IP address of the NFS server
-        'NFS_INTRANET_IP': config.nfs.ip,
+        'NFS_INTRANET_IP': ctx.cf.nfs.host.ip,
 
         # Parent dir on NFS Server
-        'NFS_PARENT_DIR': getOverlayBase(config, args.overlay_uuid),
+        'NFS_PARENT_DIR': getOverlayBase(ctx, overlayUuid),
     }
 
-    outputFile = args.output_file
-    if not outputFile:
-        outputFile = config.ocp.deploymentFileName
 
-    genFileFromTemplate(f'{config.repo.root}/openshift/deployment.yaml.template',
-                        outputFile, params)
+# ----------------------------------------------------------------------
+
+def _main():
+
+    ctx = getContext(_getArgs())
+
+    # Validate the memory resources before trying to create deployment
+    if not _areOcpMemoryResourcesValid(ctx):
+        fail("Fatal error. Stopping the deployment.")
+
+    # Set parameters for template instantiation
+
+    parms = _getParms(ctx)
+
+    # Instantiate templates
+
+    templatePath = f'{ctx.cf.build.repo.root}/openshift/'
+
+    service    = instantiateYamlTemplate(f'{templatePath}/service-nodeport.yaml.template', parms)
+    deployment = instantiateYamlTemplate(f'{templatePath}/deployment.yaml.template', parms)
+
+    if refSystemIsStandard(ctx):
+        # If the reference system is a standard system no OCP secret definition
+        # for the HDB connect user is required
+        # ->
+        # Remove all OCP secret definition related environment variables
+        # to avoid problems at deployment time in case no OCP secret was defined
+
+        delEnvVars = ('SOOS_DI_DBUSER', 'SOOS_DI_DBUSERPWD')
+        initContSpec = deployment['spec']['template']['spec']['initContainers'][0]
+        initContSpec['env'] = [e for e in initContSpec['env'] if e['name'] not in delEnvVars]
+
+    # Write deployment file
+
+    outputFile = ctx.ar.output_file
+    if not outputFile:
+        outputFile = ctx.cf.ocp.deployment.file
+
+    with open(outputFile, 'w') as oFh:
+        print(yaml.dump(service), file=oFh, end='')
+        print('---', file=oFh)
+        print(yaml.dump(deployment), file=oFh, end='')
 
     print(outputFile)
 
-    # ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
 
-if __name__ == "__main__":
-    _main()
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

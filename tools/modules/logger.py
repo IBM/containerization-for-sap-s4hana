@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 """ Logging setup """
 
+
 # Global modules
 
 import logging
@@ -23,8 +24,8 @@ import os
 import sys
 import time
 
-# Functions
 
+# Functions
 
 def _getScriptName():
     scriptName = os.path.basename(sys.argv[0])

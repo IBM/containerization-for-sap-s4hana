@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Run a command in a container running in an OpenShift cluster """
+
+
+# Global modules
+
+import sys
+
+
+# Local modules
+
+from modules.args    import (
+    getCommonArgsParser,
+    addArgContainerFlavor
+)
+from modules.context import getContext
+from modules.ocp     import (
+    containerRun,
+    getContainerName
+)
+
+
+# Functions
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Log into a container running in an OpenShift cluster'
+    )
+
+    addArgContainerFlavor(parser, ('di', 'ascs', 'hdb'), False)
+
+    parser.add_argument('command',
+                        help='Command to be executed inside the container'
+    )
+
+    return parser.parse_args()
+
+
+# ----------------------------------------------------------------------
+
+def _main():
+
+    ctx = getContext(_getArgs())
+
+    containerName = getContainerName(ctx, ctx.ar.container_flavor)
+    command       = ctx.ar.command
+
+    print(f"Executing command '{command}' in container '{containerName}'",
+          file=sys.stderr)
+
+    res = containerRun(ctx, containerName, command)
+
+    print(res.out, file=sys.stdout)
+    print(res.err, file=sys.stderr)
+
+    sys.exit(res.rc)
+
+
+# ----------------------------------------------------------------------
+
+if __name__ == '__main__':
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
+    sys.exit(0)

@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,26 +14,11 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 
-apiVersion: v1
-kind: Service
-metadata:
-  namespace: {{PROJECT}}     
-  name: {{DEPLOYMENT_NAME}}-np 
-spec:
-  type: NodePort
-  ports:
-  - port: 32{{NWS4_DI_INSTNO}}
-    targetPort: 32{{NWS4_DI_INSTNO}}
-    #nodePort: 302{{NWS4_DI_INSTNO}}
-    protocol: TCP
-  selector:
-    app: {{NWS4_IMAGE_NAME_SHORT}}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{DEPLOYMENT_NAME}}
-  namespace: {{PROJECT}}     
+  namespace: {{PROJECT}}
   labels:
     app: {{DEPLOYMENT_NAME}}
 spec:
@@ -46,7 +31,7 @@ spec:
       labels:
         app:
           {{DEPLOYMENT_NAME}}
-    spec: 
+    spec:
       hostname: {{NWS4_PQHN}}
       serviceAccountName: {{SERVICE_ACCOUNT_NAME}}
       volumes:
@@ -64,6 +49,10 @@ spec:
           nfs:
             server: {{NFS_INTRANET_IP}}
             path: {{NFS_PARENT_DIR}}/log/{{HDB_SAPSID}}
+        - name: nfs-persistence
+          nfs:
+            server: {{NFS_INTRANET_IP}}
+            path: {{NFS_PARENT_DIR}}/persistence
       initContainers:
         - name: soos-init
           image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{INIT_IMAGE_NAME_SHORT}}
@@ -71,6 +60,8 @@ spec:
           # Common for HDB and NWS4 containers
           - name: SOOS_GLOBAL_TIMEZONE
             value: Europe/Berlin
+          - name: SOOS_GLOBAL_HDB_RENAME
+            value: "{{HDB_RENAME_HOST}}"
           # NWS4 Container
           - name: SOOS_NWS4_HOST
             value: {{NWS4_PQHN}}
@@ -88,13 +79,27 @@ spec:
             value: {{NWS4_DI_PROFILE}}
           - name: SOOS_DI_INSTNO
             value: "{{NWS4_DI_INSTNO}}"
+          - name: SOOS_DI_DBUSER
+            valueFrom:
+              secretKeyRef:
+                name: {{NWS4_DI_DBCREDENTIALS_SECRET}}
+                key: HDB_DBUSER
+          - name: SOOS_DI_DBUSERPWD
+            valueFrom:
+              secretKeyRef:
+                name: {{NWS4_DI_DBCREDENTIALS_SECRET}}
+                key: HDB_DBUSERPWD
           # HDB container
           - name: SOOS_HDB_HOST
+            value: {{HDB_TARGET_HOST}}
+          - name: SOOS_HDB_SOURCE_HOST
             value: {{HDB_PQHN}}
             #- name: SOOS_HDB_DOMAIN
             #  value: {{HDB_FQHN}}
           - name: SOOS_HDB_SID
             value: {{HDB_SAPSID}}
+          - name: SOOS_HDB_INSTNO
+            value: "{{HDB_INSTNO}}"
           - name: SOOS_HDB_BASE_DIR
             value: {{HDB_BASE}}
           volumeMounts:
@@ -105,9 +110,14 @@ spec:
           - name: envdir-hdb
             mountPath: "/envdir-hdb"
       containers:
-        # HANA DB Container 
+        # HANA DB Container
         - name: {{HDB_CONTAINER_NAME}}
           image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{HDB_IMAGE_NAME_SHORT}}
+          resources:
+            requests:
+              memory: "{{HDB_REQUESTS_MEMORY}}"
+            limits:
+              memory: "{{HDB_LIMITS_MEMORY}}"
           ports:
             - containerPort: 3{{HDB_INSTNO}}13
           volumeMounts:
@@ -117,17 +127,33 @@ spec:
               mountPath: {{HDB_BASE}}/data/{{HDB_SAPSID}}
             - name: nfs-log
               mountPath: {{HDB_BASE}}/log/{{HDB_SAPSID}}
+            - name: nfs-persistence
+              mountPath: /persistence
         # NWS4 ASCS SAP System Container
         - name: {{NWS4_ASCS_CONTAINER_NAME}}
           image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{NWS4_IMAGE_NAME_SHORT}}
+          resources:
+            requests:
+              memory: "{{ASCS_REQUESTS_MEMORY}}"
+            limits:
+              memory: "{{ASCS_LIMITS_MEMORY}}"
           volumeMounts:
             - name: envdir-ascs
               mountPath: /etc/sysconfig/soos
+            - name: nfs-persistence
+              mountPath: /persistence
         # NWS4 DI SAP System Container
         - name: {{NWS4_DI_CONTAINER_NAME}}
           image: image-registry.openshift-image-registry.svc:5000/{{PROJECT}}/{{NWS4_IMAGE_NAME_SHORT}}
+          resources:
+            requests:
+              memory: "{{DI_REQUESTS_MEMORY}}"
+            limits:
+              memory: "{{DI_LIMITS_MEMORY}}"
           ports:
             - containerPort: 32{{NWS4_DI_INSTNO}}
           volumeMounts:
             - name: envdir-di
               mountPath: /etc/sysconfig/soos
+            - name: nfs-persistence
+              mountPath: /persistence

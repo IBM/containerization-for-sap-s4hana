@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,19 +15,19 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: push INIT image into ocp cluster
-  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f init -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f init -w"
   register: outmsg_init
 - name: show result after pushing INIT image
   debug:
     var: outmsg_init.stdout
 - name: push NWS4 image into ocp cluster
-  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f nws4 -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f nws4 -w"
   register: outmsg_nws4
 - name: show result after pushing NWS4 image
   debug:
     var: outmsg_nws4.stdout
 - name: push SAP HANA container image
-  shell: "{{path_to_ocp_tool}}/tools/image-push -c {{path_to_ocp_tool}}/config.yaml -f hdb -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f hdb -w"
   register: outmsg_hdb
 - name: show result after pushing SAP HANA container
   debug:

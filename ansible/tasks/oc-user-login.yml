@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,10 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: Login as user "{{oc_user}}" to OCP cluster
-  shell: "oc login --insecure-skip-tls-verify=true https://api.{{ocp_cluster_domain}}:6443 -u {{oc_user}} -p {{oc_psw}}"
+- name: Login as user "{{ ocp_user_name }}" to OCP cluster
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-login -c ./config.yaml -q ./creds.yaml -u -w"
   register: login_ocp_msg
 - debug: var=login_ocp_msg.stdout
-  
-
-

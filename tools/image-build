@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,24 +18,25 @@
 
 """ Build a container image of a given flavor """
 
+
 # Global modules
 
 import sys
+
 
 # Local modules
 
 from modules.args         import (
     getCommonArgsParser,
-    addArgFlavor
+    addArgImageFlavor
 )
-from modules.config       import getConfig
 from modules.command      import CmdShell
-from modules.imageBuilder import BuilderFactory
-from modules.logger       import setupLogging
+from modules.context      import getContext
+from modules.imagebuilder import getBuilder
 from modules.tools        import pushd
 
-# Functions
 
+# Functions
 
 def _getArgs():
     """ Get command line arguments """
@@ -43,9 +44,7 @@ def _getArgs():
         'Build a container image of a given flavor'
     )
 
-    addArgFlavor(parser)
-
-    # pylint: disable=bad-whitespace
+    addArgImageFlavor(parser)
 
     parser.add_argument(
         '-t',
@@ -53,14 +52,16 @@ def _getArgs():
         metavar  = '<temp-root>',
         required = False,
         default  = '/data/tmp',
-        help     = f"Use <temp-root> as root for temporary files generated during build")
+        help     = "Use <temp-root> as root for temporary files generated during build")
+
     parser.add_argument(
         '-d',
         '--build-directory',
         metavar  = '<build-dir>',
         required = False,
-        help     = f"Use <build-dir> as build directory; "
-                   f"if not specified, a new build directory is created under '<temp-root>'")
+        help     = "Use <build-dir> as build directory; "
+                   "if not specified, a new build directory is created under '<temp-root>'")
+
     parser.add_argument(
         '-k',
         '--keep-files',
@@ -69,36 +70,33 @@ def _getArgs():
         help     = "Keep existing files in <build-dir> which were copied from <host> in a "
                    "previous run; has no effect if '-d' is not specified"
     )
+
     return parser.parse_args()
 
-# ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
 
 def _main():
 
-    args = _getArgs()
+    ctx = getContext(_getArgs())
 
-    setupLogging(args, args.flavor)
-
-    config = getConfig(args.config_file, True)
-
-    if args.flavor == 'init':
-        with pushd(f'{config.repo.root}/flavors/init'):
-            imageName = config.flavor.init.imageNames.local
+    if ctx.ar.image_flavor == 'init':
+        with pushd(f'{ctx.cf.build.repo.root}/openshift/images/init'):
+            imageName = ctx.cf.images.init.names.local
             CmdShell().run(f'podman build -t {imageName} -f ./containerfile ./image-content')
     else:
-        # pylint: disable=bad-whitespace
-        sid  = getattr(config.flavor, args.flavor).sid
-        host = getattr(config.flavor, args.flavor).host
-        user = getattr(config.flavor, args.flavor).user
+        sidU = getattr(ctx.cf.refsys, ctx.ar.image_flavor).sidU
+        host = getattr(ctx.cf.refsys, ctx.ar.image_flavor).host.name
+        user = getattr(ctx.cr.refsys, ctx.ar.image_flavor).sidadm
 
-        factory = BuilderFactory().getBuilder(args.flavor)
-        factory.buildImage(sid, host, user, config.repo.root,
-                           args.temp_root, args.build_directory, args.keep_files)
+        getBuilder(ctx).buildImage(sidU, host, user)
+
 
 # ----------------------------------------------------------------------
 
-
 if __name__ == '__main__':
-    _main()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

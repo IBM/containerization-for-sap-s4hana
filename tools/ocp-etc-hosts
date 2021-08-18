@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,57 +18,39 @@
 
 """ Add OpenShift cluster domain entries to '/etc/hosts' """
 
+
 # Global modules
 
 import shutil
-import socket
 import sys
+
 
 # Local modules
 
-from modules.args    import getCommonArgsParser
-from modules.config  import getConfig
-from modules.logger  import setupLogging
+from modules.args    import getCommonArgs
+from modules.context import getContext
+
 
 # Functions
 
 
-def _getArgs():
-    """ Get command line arguments """
-    parser = getCommonArgsParser(
-        "Add OpenShift cluster domain entries to '/etc/hosts'"
-    )
-
-    # pylint: disable=bad-whitespace
-
-    parser.add_argument(
-        '--helper-hostname',
-        metavar  = '<helper-hostname>',
-        required = True,
-        help     = 'Hostname of helper node as seen in the Intranet'
-    )
-
-    return parser.parse_args()
-
-
 # ----------------------------------------------------------------------
 
-
 def _main():
-    """ Main function """
 
-    args = _getArgs()
+    ctx = getContext(getCommonArgs(
+        "Add OpenShift cluster domain entries to '/etc/hosts'"
+    ))
 
-    setupLogging(args)
-
-    ocpDomain = getConfig(args.config_file, False).ocp.domain
-    helperIp = socket.gethostbyname(args.helper_hostname)
+    ocpDomain = ctx.cf.ocp.domain
+    helperIp  = ctx.cf.ocp.helper.host.ip
 
     fqdns = (
         f'api.{ocpDomain}',
         f'oauth-openshift.apps.{ocpDomain}',
         f'default-route-openshift-image-registry.apps.{ocpDomain}',
-        f'console-openshift-console.apps.{ocpDomain}'
+        f'console-openshift-console.apps.{ocpDomain}',
+        f'downloads-openshift-console.apps.{ocpDomain}'
     )
 
     etcHosts = '/etc/hosts'
@@ -87,7 +69,7 @@ def _main():
               f" contain(s) entries for domain '{ocpDomain}':\n")
         for line in found:
             print(f"{line}")
-        print(f"Please check whether the following FQDN's are active and add all missing FQDN's:\n")
+        print("Please check whether the following FQDN's are active and add all missing FQDN's:\n")
         for fqdn in fqdns:
             print(f"   '{fqdn}'")
         print()
@@ -102,7 +84,9 @@ def _main():
 
 # ----------------------------------------------------------------------
 
-
 if __name__ == '__main__':
-    _main()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print()
     sys.exit(0)

@@ -1,0 +1,145 @@
+# ------------------------------------------------------------------------
+# Copyright 2021 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+build:
+  description: Build machine
+  user:
+    description: User on the build machine which is used for
+                 executing build, deploy and maintenance operations
+    sshid:
+      description: Absolute path to the private SSH ID file which is
+                   used for SSH connect operations from the build machine
+                   to remote systems
+      required: false
+      value: {{ build_user_sshid }}
+
+refsys:
+  description: Reference SAP NetWeaver or SAP S/4HANA system
+  nws4:
+    description: ASCS and Dialog instance
+    sidadm:
+      description: <sid>adm-user
+      name:
+        description: Name
+        required: true
+        value: {{ nws4_sidadm_name }}
+
+      password:
+        description: Password
+        required: false
+        value: {{ nws4_sidadm_password }}
+
+    hdbconnect:
+      description: SAP HANA database user which is used by the
+                   Dialog instance to connect to the database;
+                   *required* if the reference system is not a
+                   standard system
+      name:
+        description: Name
+        required: false
+        value: {{ nws4_hdbconnect_name }}
+
+      password:
+        description: Password
+        required: false
+        value: {{ nws4_hdbconnect_password }}
+
+  hdb:
+    description: SAP HANA database instance
+    sidadm:
+      description: <sid>adm-user
+      name:
+        description: Name
+        required: true
+        value: {{ hdb_sidadm_name }}
+
+      password:
+        description: Password
+        required: false
+        value: {{ hdb_sidadm_password }}
+
+nfs:
+  description: NFS server
+  user:
+    description: User on the NFS server which is used for accessing
+                 the NFS host via SSH (needs root permissions)
+    name:
+      description: Name
+      required: true
+      value: {{ nfs_user_name }}
+
+    password:
+      description: Password
+      required: false
+      value: {{ nfs_user_password }}
+
+    sshid:
+      description: Absolute path to the private SSH ID file which is
+                   used for SSH connect operations from the NFS server
+                   to the SAP HANA database instance system
+      required: false
+      value: {{ nfs_user_sshid }}
+
+ocp:
+  description: OpenShift Container Platform (OCP) cluster
+  user:
+    description: OCP cluster user which is used for non-admin
+                 'oc' operations
+    name:
+      description: Name
+      required: true
+      value: {{ ocp_user_name }}
+
+    password:
+      description: Password
+      required: true
+      value: {{ ocp_user_password }}
+
+  admin:
+    description: OCP cluster user which is used for admin
+                 'oc' operations
+    name:
+      description: Name
+      required: true
+      value: kubeadmin
+
+    password:
+      description: Password
+      required: true
+      value: {{ ocp_admin_password }}
+
+  helper:
+    description: Cluster helper node
+    user:
+      description: User on the OCP helper host which is used for accessing
+                   the helper host via SSH (needs root permissions)
+
+      name:
+        description: Name
+        required: true
+        value: {{ ocp_helper_node_user_name }}
+
+      password:
+        description: Password
+        required: false
+        value: {{ ocp_helper_node_user_password }}
+
+      sshid:
+        description: Absolute path to the private SSH ID file which is
+                     used for SSH connect operations from the OCP helper
+                     node to the OCP worker nodes
+        required: false
+        value: {{ ocp_helper_node_user_sshid }}

@@ -1,6 +1,5 @@
----
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,28 +13,131 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-repo:
-  root: {{path_to_ocp_tool}} # Path to the root directory of the clone of this repository on the build / deploy host
-    
+
 build:
-  tmp-root: {{tmp_root}} # Directory under which the build contexts for image build are assembled
+  description: Build machine
+  repo:
+    description: Github repository 'https://github.com/IBM/containerization-for-sap-s4hana'
+    root:
+      description: Path to the root directory of the repository clone
+                   on the build machine
+      required: true
+      value: {{ path_to_ocp_tool }}
+
+refsys:
+  description: Reference SAP NetWeaver or SAP S/4HANA system
+  nws4:
+    description: ASCS and Dialog instance
+    sid:
+      description: SAP system ID
+      required: true
+      value: {{ nws4_sid }}
+
+    host:
+      description: Host on which the system is installed
+      name:
+        description: Name of the host
+        required: true
+        value: {{ nws4_host_name }}
 
 ocp:
-  domain:   {{ocp_cluster_domain}}   # Domain name of the Red Hat OpenShift Container Platform (OCP) cluster - used for "oc" operations
-  user:     {{oc_user}}     # User in OCP cluster which is used for "oc" operations
-  password: {{oc_psw}} # Password of ocp.user in OCP cluster
-  project:  {{oc_project_name}}  # Project of ocp.user in OCP cluster under which the generated images are stored and the containers are started
+  description: OpenShift Container Platform (OCP) cluster
+  project:
+    description: Project under which the generated images
+                 are stored and the containers are started
+    required: true
+    value: {{ ocp_project_name }}
 
-flavor:
-  init:            # No parameters for flavor 'init'
-  nws4:
-    sid:    {{nws4_sid}}  # SAP system ID of the original SAP NetWeaver / SAP S/4HANA system
-    host:   {{host_nws4}} # Host on which the original SAP NetWeaver / SAP S/4HANA system is installed
-    user:   {{host_user_nws4}} # User on flavor.nws4.host which is used for ssh and rsync operations (needs root permissions)
-  hdb:             # No parameters for flavor 'hdb'
+  domain:
+    description: Cluster domain name (used for 'oc' operations)
+    required: true
+    value: {{ ocp_cluster_domain }}
+
+  helper:
+    description: Cluster helper node
+    host:
+      description: Host on which the helper node is installed
+      name:
+        description: Name of the host as seen in the intranet
+          (*not* in the cluster network)
+        required: true
+        value: {{ ocp_helper_node }}
+
+  containers:
+    description: Container instances
+    di:
+      description: SAP dialog instance
+      secret:
+        description: Name of the OCP secret in which credentials
+                     of the SAP HANA database user (see creds.yaml)
+                     are stored for use within the Pod; 
+                     *required* if the reference system is not a standard system
+        required: false
+        value: {{ containers_di_secret }}
+
+      resources:
+        requests:
+          memory:
+            description: Requested memory
+            required: false
+            value: {{ containers_di_requests_memory }}
+        limits:
+          memory:
+            description: Memory limit; must be >= requested memory
+            required: false
+            value: {{ containers_di_limits_memory }}
+
+    ascs:
+      description: SAP ASCS instance
+      resources:
+        requests:
+          memory:
+            description: Requested memory
+            required: true
+            value: {{ containers_ascs_requests_memory }}
+        limits:
+          memory:
+            description: Memory limit; must be >= requested memory
+            required: true
+            value: {{ containers_ascs_limits_memory }}
+
+    hdb:
+      description: SAP HANA instance
+      resources:
+        requests:
+          memory:
+            description: Requested memory; will be derived from the
+                         original database size if not supplied
+            required: false
+            value: {{ containers_hdb_requests_memory }}
+        limits:
+          memory:
+            description: Memory limit; must be >= requested memory;
+                         will be derived from the original database
+                         size if not supplied
+            required: false
+            value: {{ containers_hdb_limits_memory }}
 
 nfs:
-  host:        {{nfs_host}}         # Host on which the NFS server is running
-  user:        {{nfs_user}}         # User on nfs.host which is used for ssh and rsync operations (needs root permissions)
-  copyBase:    {{path_to_hdb_copy}}    # Path on nfs.host where directories {data,log} of the original HANA system are copied to
-  overlayBase: {{path_to_overlay}} # Path on nfs.host under which overlay file systems for container instances are created
+  description: NFS server
+  host:
+    description: Host on which the NFS server is running
+    name:
+      description: Name of host; if not specified
+                   ocp.helper.host.name is used
+      required: false
+      value: {{ nfs_host_name }}
+
+  bases:
+    description: Base directories
+    copy:
+      description: Path where directories {data,log} of the original
+                   SAP HANA system are copied to
+      required: true
+      value: {{ nfs_path_to_hdb_copy }}
+
+    overlay:
+      description: Path under which overlay file systems for container
+                   instances are created
+      required: true
+      value: {{ nfs_path_to_overlay }}

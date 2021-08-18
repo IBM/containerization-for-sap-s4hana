@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,13 +15,21 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: generating the deployment file {{ deployment_file }} using {{ uuid_value }}
-  shell: "{{ path_to_ocp_tool }}/tools/ocp-deployment-gen -c {{ path_to_ocp_tool }}/config.yaml -u {{ uuid_value }} -o {{ path_to_ocp_tool }}/{{ deployment_file }}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment-gen -c ./config.yaml -q ./creds.yaml -u {{ uuid_value }} -o ./{{ deployment_file }}"
   register: outmsg
 - debug: var=outmsg.stdout
 - import_tasks: ../../../tasks/oc-user-login.yml
+# start deployment 
 - name: apply the deployment file {{ deployment_file }}
-  shell: "oc apply -f {{ path_to_ocp_tool }}/{{ deployment_file }}"
-- name: get all pods
-  command: oc get pods --selector app=soos-"{{ nws4_sid_lower_case }}"
-  register: out_pods
-- debug: var=out_pods
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && oc apply -f ./{{ deployment_file }}"
+
+- import_tasks: ../../../tasks/wait_for_pod_running.yml
+- name: show pod mem info
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-pod-meminfo -c ./config.yaml -q ./creds.yaml"
+  register: out_msg
+- debug: var=out_msg
+- import_tasks: ../../../tasks/wait_for_system_running.yml
+- name: show SAP system status
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/sap-system-status -c ./config.yaml -q ./creds.yaml -w"
+  register: outmsg
+- debug: var=outmsg.stdout

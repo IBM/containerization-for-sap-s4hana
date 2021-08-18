@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,220 +16,517 @@
 
 """ Configuration file handling """
 
+
 # Global modules
 
 import logging
-import pprint
+import pathlib
 import socket
+import time
 import yaml
+
 
 # Local modules
 
-from modules.command import CmdSsh
-from modules.tools   import nestedNamespace
+from modules.command    import CmdSsh
+from modules.configbase import ConfigBase
+from modules.fail       import warn
+from modules.nestedns   import objToNestedNs
+from modules.tools      import (
+    isRepoAccessible,
+    getSpsLevelHdb
+)
+from modules.constants  import getConstants
+from modules.messages   import getMessage
+
+# Classes
 
 
-# Functions
+class _DiscoveryError(Exception):
+    pass
 
 
-def getConfig(configFile, discover=False):
-    """ Get configuration from configuartion file """
-    config = yaml.load(open(configFile, 'r'), Loader=yaml.Loader)
-    logging.debug(f'Before discovery >>>\n{pprint.pformat(config)}\n<<<')
-    if discover:
-        _discover(config)
-        logging.debug(f'After discovery >>>\n{pprint.pformat(config)}\n<<<')
-    config = nestedNamespace(config)
-    logging.debug(f'Returning >>>\n{pprint.pformat(config)}\n<<<')
-    return config
+class Config(ConfigBase):
+    """ Configuration management """
 
+    def __init__(self, ctx, create=False):
+        configFile = ctx.ar.config_file
 
-def getFlavors(config):
-    """ Get image flavors """
-    return list(vars(config.flavor).keys())
+        self._noFileMsg = f"Configuration file '{configFile}' does not exist"
 
-# Private functions
+        self._cmdSshNws4 = None  # Set in _discoverNws4()
+        self._cmdSshHdb  = None  # Set in _discoverHdb()
 
+        super().__init__(ctx, './config.yaml.template', configFile, create)
 
-def _discover(config):
-    _discoverNfs(config)
-    _discoverInit(config)
-    _discoverNws4(config)
-    _discoverHdb(config)
-    _discoverOcp(config)
+        if create:
+            return
 
+        configCacheFile    = f'{configFile}.cache'
+        configCacheTimeout = 600  # seconds
 
-def _getInstNo(cmdSsh, sid, instPrefix, host):
-    cmd = f'grep -E "SAPSYSTEM +" /usr/sap/{sid}/SYS/profile/{sid}_{instPrefix}*_{host}'
-    return cmdSsh.run(cmd).out.split('\n')[0].split()[2]
+        configMtime      = self._getMtime(configFile)  # seconds since the Epoch
+        configCacheMtime = self._getMtime(configCacheFile)
 
+        # self._config = ConfigBase.cleanup(self._getConfigFromFile(configFile))
+        self._config = self.getObj()
+        configCached = self._read(configCacheFile)
 
-def _getTimeZone(cmdSsh):
-    return cmdSsh.run('timedatectl show | grep -i timezone').out.split('=')[1]
+        if not configCached:
+            # Config cache file does not exist -> discover
+            logging.debug(f"Config cache file '{configCacheFile}' does not exist")
+            self._discoverAndCache(configCacheFile, configCacheTimeout)
 
+        elif self._referenceSystemChanged(configCached):
+            # Reference SAP system changed
+            self._discoverAndCache(configCacheFile, configCacheTimeout)
 
-def _getImageNames(config, flavor):
-    if flavor == 'init':
-        short = 'soos-init'
-    else:
-        short = f'soos-{config["flavor"][flavor]["sid"].lower()}'
-    # pylint: disable=bad-whitespace
-    local = f'localhost/{short}:latest'
-    ocp   = f'default-route-openshift-image-registry.apps.{config["ocp"]["domain"]}'
-    ocp  += f'/{config["ocp"]["project"]}/{short}:latest'
-    return {
-        'short': short,
-        'local': local,
-        'ocp':   ocp
-    }
+        elif configMtime > configCacheMtime:
+            # Original config was changed after config was cached
+            logging.debug(f"Configuration file '{configFile}' is newer"
+                          f" than cached configuration '{configCacheFile}'")
+            self._discoverAndCache(configCacheFile, configCacheTimeout)
 
+        elif float(configCached['expiryTime']) < self._getCurrentTime():
+            # Cached config is expired
+            logging.debug('Cached configuration is expired')
+            self._discoverAndCache(configCacheFile, configCacheTimeout)
 
-def _getContainerName(config, flavor):
-    shortName = config["flavor"][flavor]["imageNames"]["short"]
-    if flavor == 'nws4':  # pylint: disable=R1705
-        shortName = {
-            'ascs': f'{shortName}-ascs',
-            'di':   f'{shortName}-di'
+        else:
+            logging.debug(f"Using cached configuration from '{configCacheFile}'")
+            self._config = configCached
+
+        logging.debug(f'self._config >>>{self._config}<<<')
+
+    # Public methods
+
+    def getFull(self):
+        """ Get full configuration (inlcuding discovered parts) as nested namespace """
+        logging.debug(f'self._config >>>{self._config}<<<')
+        cleaned = ConfigBase.cleanup(self._config)
+        logging.debug(f'cleaned >>>{cleaned}<<<')
+        # return objToNestedNs(ConfigBase.cleanup(self._config))
+        return objToNestedNs(self._config)
+
+    def getImageFlavors(self):
+        """ Get image flavors """
+        return list(self._config['images'].keys())
+
+    def getContainerFlavors(self):
+        """ Get image flavors """
+        return list(self._config['ocp']['containers'].keys())
+
+    # Private methods
+
+    def _getCurrentTime(self, ):
+        return time.time()
+
+    def _getMtime(self, file):
+        mtime = -1
+        if pathlib.Path(file).exists():
+            mtime = pathlib.Path(file).stat().st_mtime
+        return mtime
+
+    def _referenceSystemChanged(self, configCached):
+        """ Check whether configured reference system differs from cached reference system """
+
+        configuredHost = self._config['refsys']['nws4']['host']['name']
+        configuredSid  = self._config['refsys']['nws4']['sid'].upper()
+        cachedHost = configCached['refsys']['nws4']['host']['name']
+        cachedSid  = configCached['refsys']['nws4']['sidU']
+
+        systemChanged = False
+        systemChanged = systemChanged or configuredHost != cachedHost
+        systemChanged = systemChanged or configuredSid != cachedSid
+
+        if systemChanged:
+            logging.debug(f"Configured reference system '{configuredSid}@{configuredHost}'"
+                          f" differs from cached reference system '{cachedSid}@{cachedHost}'")
+
+        return systemChanged
+
+    def _discoverAndCache(self, configCacheFile, configCacheTimeout):
+        logging.debug('Running configuration discovery')
+
+        # self._checkRequiredOptional()
+
+        try:
+            self._discover()
+            self._config['expiryTime'] = str(self._getCurrentTime()+configCacheTimeout)
+
+            logging.debug(f"Writing config to cache file '{configCacheFile}'")
+
+            with open(configCacheFile, 'w') as ccfh:
+                yaml.dump(self._config, stream=ccfh)
+
+        except _DiscoveryError as derr:
+            warn(f'\nThe following problem occured during configuration discovery:\n\n'
+                 f"{'-'*65}\n"
+                 f'{derr}\n'
+                 f"{'-'*65}\n\n"
+                 f'The configuration cache file was not written. Proceeding with\n'
+                 f'possibly incomplete configuration. This may lead to runtime\n'
+                 f'errors. Check your configuration file\n\n'
+                 f"    {self._instanceFile }\n\n"
+                 f'and correct the error.\n\n')
+
+    def _discover(self):
+        self._config['images'] = {}
+        self._discoverNfs()
+        self._discoverInit()
+        self._discoverNws4()
+        self._discoverHdb()
+        self._discoverOcp()
+
+    def _getInstno(self, cmdSsh, sidU, instPrefix, host):
+        cmd = f'grep -E "SAPSYSTEM +" /usr/sap/{sidU}/SYS/profile/{sidU}_{instPrefix}*_{host}'
+        result = cmdSsh.run(cmd)
+        if result.rc > 0:
+            raise _DiscoveryError(
+                f"Could not discover instance number of {sidU} on host {host}\n"
+                f"The profile"
+                f" /usr/sap/{sidU}/SYS/profile/{sidU}_{instPrefix}*_{host}"
+                f" might not exist.\n"
+                f"Check if the parameters you specified for your SAP reference"
+                f" system are valid."
+            )
+
+        return result.out.split('\n')[0].split()[2]
+
+    def _getTimeZone(self, cmdSsh):
+        return cmdSsh.run('timedatectl | grep  Time | cut -d ":" -f2 | cut -d " " -f2').out
+
+    def _getImageNames(self, flavor):
+        if flavor == 'init':
+            short = 'soos-init'
+        else:
+            short = f'soos-{self._config["refsys"][flavor]["sidL"]}'
+
+        local = f'localhost/{short}:latest'
+
+        ocp   = f'default-route-openshift-image-registry.apps.{self._config["ocp"]["domain"]}'
+        ocp  += f'/{self._config["ocp"]["project"]}/{short}:latest'
+
+        return {
+            'short': short,
+            'local': local,
+            'ocp':   ocp
         }
-    return shortName
 
+    def _getContainerName(self, containerFlavor):
+        if containerFlavor in ['init', 'hdb']:
+            shortName = self._config['images'][containerFlavor]['names']['short']
 
-def _discoverInit(config):
-    config['flavor']['init'] = {}
+        elif containerFlavor in ['di', 'ascs']:
+            shortName = f"{self._config['images']['nws4']['names']['short']}-{containerFlavor}"
 
-    # Image names
+        else:
+            raise _DiscoveryError(f"Unknown container flavor '{containerFlavor}'")
 
-    config['flavor']['init']['imageNames'] = _getImageNames(config, 'init')
+        return shortName
 
-    # Container name
+    def _discoverInit(self):
+        # Image names
 
-    config['flavor']['init']['containerName'] = _getContainerName(config, 'init')
+        self._config['images']['init'] = {'names': self._getImageNames('init')}
 
+    def _discoverNws4(self):
 
-def _discoverNws4(config):
-    # pylint: disable=bad-whitespace
-    sid  = config['flavor']['nws4']['sid'].upper()
-    host = config['flavor']['nws4']['host']
-    user = config['flavor']['nws4']['user']
+        # Host and <sid>adm user
 
-    cmdSsh = CmdSsh(host, user)
+        host = self._config['refsys']['nws4']['host']['name']
+        sidL = self._config['refsys']['nws4']['sid'].lower()
+        sidU = self._config['refsys']['nws4']['sid'].upper()
 
-    # Initialize instance specific dictionaries
+        self._config['refsys']['nws4']['sidL'] = sidL
+        self._config['refsys']['nws4']['sidU'] = sidU
+        del self._config['refsys']['nws4']['sid']
 
-    config['flavor']['nws4']['ascs'] = {}
-    config['flavor']['nws4']['di']   = {}
+        user = self._ctx.cr.refsys.nws4.sidadm
+        if user.name != f'{sidL}adm':
+            raise _DiscoveryError(
+                f"Mismatch between credentials file nws4 user name '{user.name}'\n"
+                f"and derived configuration file nws4 user name '{sidL}adm.'\n"
+                f"Check credentials file parameter 'refsys.nws4.sidadm.name' and\n"
+                f"configuration file parameter 'refsys.nws4.sid' and correct the\n"
+                f"wrong value."
+            )
 
-    # Time zone
+        self._config['refsys']['nws4']['host']['ip'] = socket.gethostbyname(host)
 
-    config['flavor']['nws4']['timezone'] = _getTimeZone(cmdSsh)
+        self._cmdSshNws4 = CmdSsh(self._ctx, host, user)
 
-    # Instance numbers
+        # User and group ID of <sid>adm
 
-    ascsInstNo = _getInstNo(cmdSsh, sid, 'ASCS', host)
-    diInstNo   = _getInstNo(cmdSsh, sid, 'D', host)
+        (uid, gid) = self._cmdSshNws4.run(f'grep "{user.name}" /etc/passwd').out.split(':')[2:4]
+        self._config['refsys']['nws4']['sidadm'] = {'uid': uid, 'gid': gid}
 
-    config['flavor']['nws4']['ascs']['instNo'] = ascsInstNo
-    config['flavor']['nws4']['di']['instNo']   = diInstNo
+        # Time zone
 
-    # Image names
+        self._config['refsys']['nws4']['timezone'] = self._getTimeZone(self._cmdSshNws4)
 
-    config['flavor']['nws4']['imageNames'] = _getImageNames(config, 'nws4')
+        # SAPFQDN
+        result = self._cmdSshNws4.run(
+            f'grep "^SAPFQDN" /usr/sap/{sidU}/SYS/profile/DEFAULT.PFL'
+        )
 
-    # Container names
+        if result.rc > 0:
+            logging.warning("Could not discover SAPFQDN "
+                            f"from /usr/sap/{sidU}/SYS/profile/DEFAULT.PFL")
+            self._config['refsys']['nws4']['sapfqdn'] = ""
+        else:
+            self._config['refsys']['nws4']['sapfqdn'] = result.out.split('\n')[0].split()[2]
 
-    config['flavor']['nws4']['ascs']['containerName'] = _getContainerName(config, 'nws4')['ascs']
-    config['flavor']['nws4']['di']['containerName']   = _getContainerName(config, 'nws4')['di']
+        # Instance specific parameters
 
-    # SAPFQDN
+        ascsInstno = self._getInstno(self._cmdSshNws4, sidU, 'ASCS', host)
+        diInstno   = self._getInstno(self._cmdSshNws4, sidU, 'D', host)
 
-    config['flavor']['nws4']['sapfqdn'] = cmdSsh.run(
-        f'grep "^SAPFQDN" /usr/sap/{sid}/SYS/profile/DEFAULT.PFL').out.split('\n')[0].split()[2]
+        self._config['refsys']['nws4']['ascs'] = {
+            # Instance number
+            'instno': ascsInstno,
 
-    # Default profile names
+            # Default profile name
+            'profile': f'{sidU}_ASCS{ascsInstno}_{host}'
+        }
 
-    config['flavor']['nws4']['ascs']['profileName'] = f'{sid}_ASCS{ascsInstNo}_{host}'
-    config['flavor']['nws4']['di']['profileName']   = f'{sid}_D{diInstNo}_{host}'
+        self._config['refsys']['nws4']['di'] = {
+            # Instance number
+            'instno': diInstno,
 
-    del cmdSsh
+            # Default profile name
+            'profile': f'{sidU}_D{diInstno}_{host}'
+        }
 
+        # Image names
 
-def _discoverHdb(config):
-    # pylint: disable=bad-whitespace
-    config['flavor']['hdb'] = {}
-    cmdSsh = CmdSsh(config['flavor']['nws4']['host'], config['flavor']['nws4']['user'])
+        self._config['images']['nws4'] = {'names': self._getImageNames('nws4')}
 
-    host = _discoverHdbHost(cmdSsh, config)
-    user = _discoverHdbUser(config)
-    sid  = _discoverHdbSid(cmdSsh, config)
-    base = _discoverHdbBase(sid, host, user)
+        # Set optional package names to be installed
 
-    config['flavor']['hdb']['host'] = host
-    config['flavor']['hdb']['user'] = user
-    config['flavor']['hdb']['sid']  = sid
-    config['flavor']['hdb']['base'] = base
+        self._config['images']['nws4']['packages'] = []
 
-    # Time zone
+    def _discoverHdb(self):
+        self._config['refsys']['hdb'] = {}
 
-    config['flavor']['hdb']['timezone'] = _getTimeZone(cmdSsh)
+        host = self._discoverHdbHost()
+        sid  = self._discoverHdbSid()
+        sidL = sid.lower()
+        sidU = sid.upper()
 
-    # Instance numbers
+        # self._config['refsys']['hdb']['sid']  = sid
+        self._config['refsys']['hdb']['sidL'] = sidL
+        self._config['refsys']['hdb']['sidU'] = sidU
 
-    config['flavor']['hdb']['instNo'] = _getInstNo(cmdSsh, sid, 'HDB', host)
+        user = self._ctx.cr.refsys.hdb.sidadm
+        if user.name != f'{sidL}adm':
+            raise _DiscoveryError(
+                f"Mismatch between credentials file hdb user name '{user.name}'\n"
+                f"and derived configuration file hdb user name '{sidL}adm.'\n"
+                f"Check credentials file parameter 'refsys.hdb.sidadm.name' and\n"
+                f"configuration file parameter 'refsys.hdb.sid' and correct the\n"
+                f"wrong value."
+            )
 
-    # Image name
+        self._config['refsys']['hdb']['host'] = {
+            'name': host,
+            'ip':   socket.gethostbyname(host)
+        }
 
-    config['flavor']['hdb']['imageNames'] = _getImageNames(config, 'hdb')
+        self._cmdSshHdb = CmdSsh(self._ctx, host, user)
 
-    # Container name
+        base = self._discoverHdbBase(sidU)
+        self._config['refsys']['hdb']['base'] = base
 
-    config['flavor']['hdb']['containerName'] = _getContainerName(config, 'hdb')
+        # User and group ID of <sid>adm
+        # Must be performed on HDB host!
 
-    del cmdSsh
+        result = self._cmdSshHdb.run(f'grep "{user.name}" /etc/passwd')
+        if result.rc > 0:
+            raise _DiscoveryError(f"Could not discover uid and gid for user {user.name}.")
+        (uid, gid) = result.out.split(':')[2:4]
+        self._config['refsys']['hdb']['sidadm'] = {'uid': uid, 'gid': gid}
 
+        # Time zone
 
-def _discoverNfs(config):
-    config['nfs']['ip'] = socket.gethostbyname(config['nfs']['host'])
+        self._config['refsys']['hdb']['timezone'] = self._getTimeZone(self._cmdSshHdb)
 
+        # Instance specific parameters
+        # Must be performed on HDB host!
 
-def _discoverOcp(config):
-    # pylint: disable=bad-whitespace
-    project = config['ocp']['project']
-    nws4Sid = config['flavor']['nws4']['sid'].lower()
-    hdbSid  = config['flavor']['hdb']['sid'].lower()
+        # Instance number
 
-    config['ocp']['helperHost']             = f'api.{config["ocp"]["domain"]}'
-    config['ocp']['serviceAccountName']     = f'{project}-sa'
-    config['ocp']['serviceAccountFileName'] = f'{project}-service-account.yaml'
-    config['ocp']['deploymentFileName']     = f'{project}-deployment-{nws4Sid}-{hdbSid}.yaml'
+        self._config['refsys']['hdb']['instno'] = self._getInstno(self._cmdSshHdb,
+                                                                  sidU, 'HDB', host)
 
+        # HDB host rename
 
-def _discoverHdbSid(cmdSsh, config):
-    return cmdSsh.run(f'grep dbs/hdb/dbname {_getDefaultPfl(config)}').out.split('=')[1].strip()
+        nws4HostName = self._config['refsys']['nws4']['host']['name']
+        hdbHostName  = self._config['refsys']['hdb']['host']['name']
 
+        if nws4HostName == hdbHostName:
+            self._config['refsys']['hdb']['rename'] = 'no'
+        else:
+            self._config['refsys']['hdb']['rename'] = 'yes'
 
-def _discoverHdbHost(cmdSsh, config):
-    return cmdSsh.run(f'grep SAPDBHOST {_getDefaultPfl(config)}').out.split('=')[1].strip()
+        # Image names
 
+        self._config['images']['hdb'] = {'names': self._getImageNames('hdb')}
 
-def _discoverHdbUser(config):
-    # TODO when we support Distributed and/or HA user must be part of config.yaml!
-    return config['flavor']['nws4']['user']
+        # Set optional packages
+        packages = self._discoverHdbOptPkgs()
+        logging.debug(f'Optional packages for hdb: {packages}')
+        self._config['images']['hdb']['packages'] = packages
 
+    def _discoverNfs(self):
+        if not self._config['nfs']['host']['name']:
+            self._config['nfs']['host']['name'] = self._config['ocp']['helper']['host']['name']
 
-def _discoverHdbBase(sid, host, user):
-    # pylint: disable=bad-whitespace
-    hdbCmdSsh = CmdSsh(host, user)
-    profile   = f'/usr/sap/{sid}/SYS/profile'
-    out       = hdbCmdSsh.run(f'readlink {profile}').out
-    # example for out:
-    # /hana/shared/SID/profile
-    # after splitting it:
-    # ['','hana','shared','SID','profile']
-    # We ignore the last three components
-    del hdbCmdSsh
-    return '/'.join(out.split('/')[:-3])
+        hostIp = socket.gethostbyname(self._config['nfs']['host']['name'])
+        self._config['nfs']['host']['ip'] = hostIp
 
+    def _discoverOcp(self):
+        project = self._config['ocp']['project']
+        nws4Sid = self._config['refsys']['nws4']['sidL']
+        hdbSid  = self._config['refsys']['hdb']['sidL']
 
-def _getDefaultPfl(config):
-    sid = config['flavor']['nws4']['sid']
-    return f'/usr/sap/{sid}/SYS/profile/DEFAULT.PFL'
+        hostIp = socket.gethostbyname(self._config['ocp']['helper']['host']['name'])
+        self._config['ocp']['helper']['host']['ip'] = hostIp
+
+        self._config['ocp']['sa'] = {
+            'name':     f'{project}-sa',
+            'file': f'{project}-service-account.yaml'
+        }
+
+        self._config['ocp']['deployment'] = {
+            'file': f'{project}-deployment-{nws4Sid}-{hdbSid}.yaml'
+        }
+
+        # Containers
+
+        self._config['ocp']['containers']['init'] = {}
+
+        self._config['ocp']['containers']['init']['name'] = self._getContainerName('init')
+        self._config['ocp']['containers']['hdb']['name']  = self._getContainerName('hdb')
+        self._config['ocp']['containers']['ascs']['name'] = self._getContainerName('ascs')
+        self._config['ocp']['containers']['di']['name']   = self._getContainerName('di')
+
+        # Set requested resources for containers
+
+        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+
+        # Memory for HDB container
+        #
+        # discovered size for HDB container:
+        # size of the HANA filesystem
+        # Value for both limits and requests are set to discovered size
+        # if no value specified in configuration
+
+        hdbMinMem  =  f'{self._discoverHdbSizeGiB()}Gi'
+
+        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+        for kind in ('requests', 'limits'):
+            res = self._config['ocp']['containers']['hdb']['resources'][kind]
+            if not res['memory']:
+                res['memory'] = hdbMinMem
+                logging.warning(getMessage("msgL001", kind, "HDB", hdbMinMem))
+
+        # Memory for NWS4 Dialog Instance container
+        #
+        # discovered size for NWS4 DI container:
+        # PHYS_MEMSIZE if available in Instance Profile
+        # or 10 percent of physical memory size of reference system, at least 32GiB
+        # Value for both limits and requests are set to discovered size
+        # if no value specified in configuration
+
+        diMinMem  =  f'{self._discoverDiSizeGiB()}Gi'
+
+        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+        for kind in ('requests', 'limits'):
+            res = self._config['ocp']['containers']['di']['resources'][kind]
+            if not res['memory']:
+                res['memory'] = diMinMem
+                logging.warning(getMessage("msgL001", kind, "Dialog Instance", diMinMem))
+
+    def _discoverHdbSid(self):
+        cmd = f'grep dbs/hdb/dbname {self._getDefaultPfl()}'
+        result = self._cmdSshNws4.run(cmd)
+        if result.rc > 0:
+            raise _DiscoveryError(f"Could not discover HANA SID from {self._getDefaultPfl()}")
+        return result.out.split('=')[1].strip()
+
+    def _discoverHdbHost(self):
+        cmd = f'grep SAPDBHOST {self._getDefaultPfl()}'
+        result = self._cmdSshNws4.run(cmd)
+        if result.rc > 0:
+            raise _DiscoveryError(f"Could not discover SAPDBHOST from {self._getDefaultPfl()}")
+        return result.out.split('=')[1].strip()
+
+    def _discoverHdbBase(self, sidU):
+        profile   = f'/usr/sap/{sidU}/SYS/profile'
+        out       = self._cmdSshHdb.run(f'readlink {profile}').out
+        # example for out:
+        # /hana/shared/SID/profile
+        # after splitting it:
+        # ['','hana','shared','SID','profile']
+        # We ignore the last three components
+        return '/'.join(out.split('/')[:-3])
+
+    def _discoverHdbSizeGiB(self):
+        """ Discover storage in GiB needed for HDB content """
+        sidU    = self._config['refsys']['hdb']['sidU']
+        dataDir = f"{self._config['refsys']['hdb']['base']}/data/{sidU}"
+        out = self._cmdSshHdb.run(f'du -s -B 1G {dataDir} | cut -f1').out
+        return int(out) + getConstants().additionalFreeSpaceHdbGiB
+
+    def _discoverHdbOptPkgs(self):
+        # to get the version of the HANA DB, we need the path to the instance directory
+        sidU   = self._config['refsys']['hdb']['sidU']
+        instno = self._config['refsys']['hdb']['instno']
+        spsLevel = getSpsLevelHdb(self._cmdSshHdb, sidU, instno)
+        logging.debug(f'HANA DB SPS Level: {spsLevel}')
+
+        optionalHdbPkgs = []
+        for pkg in getConstants().optionalHdbPkgs:
+            if pkg.minSpsLevel <= spsLevel < pkg.maxSpsLevel:
+                logging.debug(f'Optional package to be installed: {pkg.packageName}')
+                logging.debug(f'enabling repository: {pkg.repository}')
+                pkg.dnfInstallable  = isRepoAccessible(pkg.repository)
+                optionalHdbPkgs.append(pkg)
+        return optionalHdbPkgs
+
+    def _discoverDiSizeGiB(self):
+        """ Discover storage in GiB needed for Dialog Instance """
+        memsize = self._discoverDiSizeFromInstProfileGiB()
+        if memsize > 0:
+            return memsize
+        return max(self._discoverDiSizeFromRefHostGiB(), getConstants().minMemSizeDIGiB)
+
+    def _discoverDiSizeFromInstProfileGiB(self):
+        profile      = self._getInstanceProfile()
+        memsizeInMiB = self._cmdSshNws4.run(f'grep PHYS_MEMSIZE {profile} | cut -d = -f2').out
+        if not memsizeInMiB:
+            return 0
+        return int(memsizeInMiB) // 1024
+
+    def _discoverDiSizeFromRefHostGiB(self):
+        # Output of 'grep MemTotal /proc/meminfo' looks like:
+        # MemTotal:       64819648 kB
+        #
+        cmd  = "grep MemTotal /proc/meminfo "
+        cmd += "| cut -d : -f2 "
+        memsizeInKb  = int(self._cmdSshNws4.run(cmd).out.split()[0])
+        memsizeInGiB = memsizeInKb // 1024 // 1024
+
+        # The size is set to 10% of MemTotal (according to SAP Settings)
+        return memsizeInGiB // 10
+
+    def _getInstanceProfile(self):
+        sidU     = self._config['refsys']['nws4']['sidU']
+        profile  = f'/usr/sap/{sidU}/SYS/profile/'
+        profile += self._config['refsys']['nws4']['di']['profile']
+        return profile
+
+    def _getDefaultPfl(self):
+        sidU = self._config['refsys']['nws4']['sidU']
+        return f'/usr/sap/{sidU}/SYS/profile/DEFAULT.PFL'

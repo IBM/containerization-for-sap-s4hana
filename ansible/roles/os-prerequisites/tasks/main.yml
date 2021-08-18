@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,42 +15,8 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 
-# check connection to OCP4 cluster
-- name: check connection to api.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} ls"
-  register: outmsg_api
-  ignore_errors: true
-- name: check connection to oauth-openshift.apps.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@oauth-openshift.apps.{{ ocp_cluster_domain }} ls"
-  register: outmsg_oauth
-  ignore_errors: true
-- name: check connection to default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} hostname
-  shell: "ssh -o StrictHostKeyChecking=no root@default-route-openshift-image-registry.apps.{{ ocp_cluster_domain }} ls"
-  register: outmsg_route
-  ignore_errors: true
-- name: Failed check connection to OCP4 cluster
-  fail:
-    msg: "Insert the `<ocp4-helper-node-ip> api.<ocp-cluster-domain> oauth-openshift.apps.<ocp-cluster-domain> default-route-openshift-image-registry.apps.<ocp-cluster-domain>` into the /etc/hosts file on your build LPAR. Check that password-less access is possible for user root to these hosts."
-  when: outmsg_api.rc != 0 or outmsg_oauth.rc != 0 or outmsg_route.rc != 0
-
 # check if oc tool is installed and copy it from helper node if not installed
-- name: verify local oc tool
-  command: which oc
-  ignore_errors: true
-  register: outmsg
-- name: verify oc tool on OCP4 helper node
-  command: ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} "which oc"
-  register: outmsg_helper
-  ignore_errors: true
-  when: outmsg.rc !=0
-- name: copy oc tool from OCP4 helper node to build LPAR
-  command: scp -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }}:{{ outmsg_helper.stdout }} {{ outmsg_helper.stdout }}
-  register: outmsg_scp
-  when: outmsg.rc != 0 and outmsg_helper is defined and outmsg_helper.rc == 0
-- name: check if oc tool is installed
-  debug: msg="{{ outmsg_scp.stderr }}"
-  failed_when: outmsg_scp.rc != 0
-  when: outmsg_scp.stderr is defined and outmsg_scp.rc != 0
+- import_tasks: check_oc_tool.yml
 
 # check temp directory for image builds
 - name: create temp directory for image builds
@@ -58,21 +24,12 @@
     path: "{{ tmp_root }}"
     state: directory
 
-# check NFS server connections
-- name: check ssh connection to NFS server {{ nfs_user }}@{{ nfs_host }}
-  shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} ls"
-- name: check ssh connection from NFS server to SAP reference system LPAR {{ host_user_nws4 }}@{{ host_nws4 }}
-  shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} 'ssh -o StrictHostKeyChecking=no {{ host_user_nws4 }}@{{ host_nws4 }} cat /usr/sap/sapservices'"
-  register: outmsg_ssh
-- name: show /usr/sap/sapservices file content
-  debug: var=outmsg_ssh.stdout_lines
-
-# check NFS directories on NFS server
-- name: create NFS hdb directory on NFS server
-  command: ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} "mkdir -p {{ path_to_hdb_copy }}"
-- name: create NFS overlay directory on NFS server
-  command: ssh -o StrictHostKeyChecking=no {{ nfs_user }}@{{ nfs_host }} "mkdir -p {{ path_to_overlay }}"
-
+# verify connection to  NFS server and create directories for HDB copy
+- import_tasks: verify_nfs_server.yml
+ 
+# verify NFS directories on NFS server for HDB copy and overlay share
+- import_tasks: verify_nfs_hdb_directories.yml
+  
 # install all required libraries
 - name: install podman
   package:
@@ -82,19 +39,41 @@
   package:
     name: git
     state: "{{ package_state }}"
-- name: install python3
+- name: install {{ python3x_version }}
   package:
-    name: python3
+    name: "{{ python3x_version }}"
     state: "{{ package_state }}"  
-- name: install python3-devel
+- name: install "{{ python3x_version }}-devel"
   package:
-    name: python3-devel
+    name: "{{ python3x_version }}-devel"
     state: "{{ package_state }}"
-- import_tasks: ../../../tasks/rhel8.x-prerequisites.yml
-- name: install paramiko
-  pip: name=paramiko state="{{ package_state}}"
+- name: install "{{ python3x_version }}-pip"
+  package:
+    name: "{{ python3x_version }}-pip"
+    state: "{{ package_state }}"
+
+- name: set up a Python virtual environment with all Python modules
+  shell: "cd {{ path_to_ocp_tool }} && ./tools/venv-setup "
+  register: outmsg
+  ignore_errors: true
+- debug: var=outmsg.stdout_lines
+- name: check failed venv setup
+  debug: var=outmsg.stderr_lines
+  failed_when: outmsg.rc != 0
+  when: outmsg.rc != 0
+  
+- name: activate virtual environment
+  shell: "source {{ path_to_ocp_tool }}/venv/bin/activate"
+  register: outmsg
+- debug: var=outmsg
 
 # generate config.yml and verify its parameters
-- import_tasks: gen-verify-config.yml
+- import_tasks: gen-config-creds.yml
 
-#- import_tasks: prepare-subtrees.yml
+- name: add cluster ip to /etc/hosts
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-etc-hosts -c ./config.yaml -q ./creds.yaml -w"
+  register: outmsg
+- debug: var=outmsg
+
+# check connection to OCP4 cluster
+- import_tasks: check_connection_to_ocp4_cluster.yml
