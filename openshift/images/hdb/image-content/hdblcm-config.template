@@ -71,10 +71,10 @@ target_sid={{SID}}
 number={{INST_NO}}
 
 # Location of Data Volumes
-datapath={{SOOS_HDB_BASE_DIR}}/data/{{SID}}
+datapath={{SOOS_HDB_BASE_DATA_DIR}}/data/{{SID}}
 
 # Location of Log Volumes
-logpath={{SOOS_HDB_BASE_DIR}}/log/{{SID}}
+logpath={{SOOS_HDB_BASE_LOG_DIR}}/log/{{SID}}
 
 # Location of Data Backups
 databackuppath={{SOOS_HDB_BASE_DIR}}/shared/{{SID}}/HDB{{INST_NO}}/backup/data

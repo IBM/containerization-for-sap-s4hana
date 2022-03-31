@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+  Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ all required fields:
    + Add a description.
    + Select organization - as an example `Default` can be used.
    + Select `Git` as __SCM TYPE__.
-   + Specify __SCM BRANCH/TAG/COMMIT__ to checkout source code, as example `master` can be defined.
+   + Specify __SCM BRANCH/TAG/COMMIT__ to checkout source code, as example `main` can be defined.
    + Select __SCM UPDATE OPTIONS__ check boxes such as `clean`, `delete on update` and `update revision on launch`.
 
 You do not need credentials to access our GitHub repository since the
@@ -121,10 +121,10 @@ images were successfully built and the deployment of the SAP system
 was successfully started.
 
 Verify whether your SAP system was correctly started by performing the
-steps described in section [*Verifying the
-Deployment*](VERIFYING-MANAGING.md#verifying-the-deployment).
+steps described in section [*Verifying 
+Deployments*](VERIFYING-MANAGING.md#verifying-deployments).
 
 ## Connecting to the Deployed SAP System
 
-To connect to the deployed SAP system refer to section [*Managing Your
-Deployment*](VERIFYING-MANAGING.md#managing-your-deployment).
+To connect to the deployed SAP system refer to section [*Managing
+Deployments*](VERIFYING-MANAGING.md#managing-deployments).

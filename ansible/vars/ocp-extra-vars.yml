@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,10 @@
 
 # Path to the directory of the clone of this repository on the build LPAR,required
 path_to_ocp_tool: <github_clone_dir>
+
+# Debug level, the default value is warning,
+# if it's needed change the logging level to critical, error, warning, info, debug, notset 
+debug_level_ocp_tool: warning
 
 # Directory under which the build contexts for image build are assembled
 tmp_root: /data/tmp
@@ -50,8 +54,11 @@ build_user_sshid: ''
 # The build LPAR must be able to connect to api.<ocp_cluster_domain>, required
 ocp_cluster_domain: <ocp4_cluster_domain_name>
 
+# Admin user name of OCP cluster that will be used for setting up configuration, required
+ocp_admin_name: <ocp4_admin>
+
 # Password of the kubeadmin user in OCP cluster,required
-ocp_admin_password: <kubeadmin_password>
+ocp_admin_password: <admin_password>
 
 # User in OCP cluster which is used for "oc" operations, required
 ocp_user_name: <ocp4_userid>
@@ -85,13 +92,8 @@ ocp_helper_node_user_sshid: ''
 # The SAP instance profile must also have this hostname in its name
 nws4_host_name: <reference_system_hostname>
 
-# ASCS and Dialog instance, SAP system ID, required, upper case
+# ASCS and Dialog instance, SAP system ID, required
 nws4_sid: <AppServer_SID>
-
-# SAP system ID of the original SAP NetWeaver or SAP S/4HANA system (lower case)
-# Use lower case "sid" to generate deployment file name
-# Please provide instance number for ASCS and DI
-nws4_sid_lower_case: <AppServer_sid_lower_case>
 
 # ASCS and Dialog instance <sid>adm user, required
 nws4_sidadm_name: <AppServer_sidadm_name>
@@ -110,9 +112,8 @@ nws4_hdbconnect_name: SAPHANADB
 # specify '' if the reference system is a standard system
 nws4_hdbconnect_password: <HDB_connect_password>
 
-# SAP system ID of the original SAP HANA system (lower case)
-# Use lower case "sid" to generate deployment file name, required 
-hdb_sid_deployment: <HDB_sid_name_lower_case>
+# SAP system ID of the original SAP HANA system to generate deployment file name, required 
+hdb_sid_deployment: <HDB_sid_name>
 
 # SAP HANA database <sid>adm user name, required
 hdb_sidadm_name: <HDB_sidadm_user_name>
@@ -163,11 +164,6 @@ nfs_user_name: root
 # NFS user password, optional; 
 # Specify '' if password-less access is configured
 nfs_user_password: <NFS_user_password>
-
-# Absolute path to the private SSH ID file which is used for SSH connect operations 
-# from the NFS server to the SAP HANA database instance system, optional
-# If the value is '' then the configured user ssh settings from ~/.ssh/ are used 
-nfs_user_sshid: ''
 
 # Path on nfs_host where directories {data,log} of the original HANA system are copied to, required 
 nfs_path_to_hdb_copy: <NFS_server_export_dir_for_hdb>

@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,19 +22,24 @@
 import os
 import types
 import uuid
-
+import logging
 
 # Local modules
-
-from modules.command import CmdSsh
+from modules.command import (
+    CmdSsh,
+    CmdShell,
+)
 from modules.fail    import fail
-
+from modules.ocp     import Ocp
 
 # Functions
 
-def getHdbSubDirs():
+
+def getHdbSubDirs(ctx):
     """ Get SAP HANA database top-level subdirectories """
-    return ['data', 'log']
+    data = types.SimpleNamespace(base=ctx.cf.refsys.hdb.base.data, path='data')
+    log  = types.SimpleNamespace(base=ctx.cf.refsys.hdb.base.log, path='log')
+    return [data, log]
 
 
 def getHdbCopyBase(ctx):
@@ -67,22 +72,56 @@ def getPersistenceDir(ctx, overlayUuid):
     return f'{baseDir}/persistence'
 
 
+def getAllNfsServerIpAddresses(ctx):
+    """ Get a list of all ip addresses """
+    cmdSsh = CmdSsh(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
+    # Get all ip adresses (v4) of the NFS server
+    ipAddrList = cmdSsh.run('hostname -I').out
+    logging.debug(f'IP addresses of {ctx.cf.nfs.host.name}: [{ipAddrList}]')
+    return f'{ipAddrList}'
+
+
+def getValidNfsServerAddress(ctx):
+    """ Get valid NFS server address serving the OCP cluster net """
+
+    # Get all IP addresses for NFS server
+    allIps = getAllNfsServerIpAddresses(ctx)
+
+    # Need an OC login to get worker node address
+    ocp     = Ocp(ctx, login="admin", verify=True)
+    worker  = ocp.getWorkerNodeList()[0]
+
+    # Run Python script tools/modules/nfs-ping-test on helper node (in-line)
+    cmdShell = CmdShell()
+    host     = ctx.cf.ocp.helper.host.name
+    user     = ctx.cr.ocp.helper.user
+    repo     = ctx.cf.build.repo.root
+    toolCmd  = f'python3 - <{repo}/tools/modules/nfs-ping-test {worker} {allIps}'
+
+    cmdSsh   = CmdSsh(ctx, host, user, reuseCon=False)
+    runCmd, secr = cmdSsh.getSshCmdAndSecrets(withLogin=True)
+
+    ipAddr = cmdShell.run(f'{runCmd} {toolCmd}', secrets=secr).out
+    logging.debug(f"Running shell cmd: '{runCmd} {toolCmd}' returns '{ipAddr}'")
+    if ipAddr == 'None':
+        message  =  "Could not identify valid IP address for the NFS server"
+        message += f"on worker node {worker}.\n"
+        fail(message)
+
+    del ocp
+    return ipAddr
+
 # Classes
+
 
 class Overlay():
     """ Representation of an overlay filesystem share """
 
     @staticmethod
-    def create(ctx):
+    def create(ctx, overlayUuid):
         """ Create a new overlay filesystem share on the NFS server """
 
         cmdSsh = CmdSsh(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
-
-        overlayUuid  = f'{uuid.uuid1()}'
-        overlayUuid += f'-{ctx.cr.ocp.user.name}'
-        overlayUuid += f'-{ctx.cf.ocp.project}'
-        overlayUuid += f'-{ctx.cf.refsys.hdb.host.name}'
-        overlayUuid += f'-{ctx.cf.refsys.hdb.sidU}'
 
         # Making an overlay-fs NFS-mountable requires additional mount
         # options when establishing the overlay-fs; see also:
@@ -90,7 +129,8 @@ class Overlay():
         #   https://serverfault.com/questions/949892/nfs-export-an-overlay-of-ext4-and-btrfs
         #   https://www.kernel.org/doc/Documentation/filesystems/overlayfs.txt
         #
-        # XXX NEEDED OPTIONS MAY DEPEND ON FILESYSTEM TYPE OF lower, work AND upper -
+        # XXX NEEDED OPTIONS MAY DEPEND ON FILESYSTEM TYPE # pylint: disable=W0511
+        #     OF lower, work AND upper -
         #     THIS MAY VARY FROM CUSTOMER TO CUSTOMER
 
         # NFS specific mount options for each overlay file system
@@ -111,9 +151,8 @@ class Overlay():
         exportOptsGeneric += ',no_root_squash'
         exportOptsGeneric += ',sync'
 
-        for subDir in getHdbSubDirs():
-            ovld = getOverlayDirs(ctx, subDir, overlayUuid)
-
+        for subDir in getHdbSubDirs(ctx):
+            ovld = getOverlayDirs(ctx, subDir.path, overlayUuid)
             cmdSsh.run(f'mkdir -p "{ovld.upper}" "{ovld.work}" "{ovld.merged}"')
 
             # Add to /etc/fstab for automatic mount after reboot
@@ -179,7 +218,8 @@ class Overlay():
         self._cmdSsh = CmdSsh(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
 
     def __str__(self):
-        return f"{self.uuid} ({self.date} {self.time})"
+        # return f"{self.uuid} ({self.date} {self.time})"
+        return f"{self.uuid} {self.date} {self.time}"
 
     def delete(self):
         """ Delete an overlay filesystem share on the NFS server """
@@ -198,11 +238,11 @@ class Overlay():
 
         # Tear down all overlay file systems
 
-        for subDir in getHdbSubDirs():
-            ovld = getOverlayDirs(self._ctx, subDir, self.uuid)
+        for subDir in getHdbSubDirs(self._ctx):
+            ovld = getOverlayDirs(self._ctx, subDir.path, self.uuid)
             self._cmdSsh.run(f'umount {ovld.merged}')
-            self._cmdSsh.run(f'rm -rf {ovld.base}/{subDir}*/* 2>/dev/null')
-            self._cmdSsh.run(f'rmdir -p {ovld.base}/{subDir}* 2>/dev/null')
+            self._cmdSsh.run(f'rm -rf {ovld.base}/{subDir.path}*/* 2>/dev/null')
+            self._cmdSsh.run(f'rmdir -p {ovld.base}/{subDir.path}* 2>/dev/null')
 
         # Tear down the persistence file system
 

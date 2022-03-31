@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,5 @@
 - debug: var=uuid_status.stdout
 - name: store uuid for the deployment file
   set_fact: 
-    uuid_value: "{{ uuid_status.stdout }}"
-    deployment_file: "{{ ocp_project_name }}-deployment-{{ nws4_sid_lower_case }}-{{ hdb_sid_deployment }}.yaml"
-
+    overlay_share_name: "{{ uuid_status.stdout }}"
+    uuid_value: "{{ uuid_status.stdout.split('-') | last }}"

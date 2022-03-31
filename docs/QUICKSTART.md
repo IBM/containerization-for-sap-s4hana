@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2021 IBM Corp. All Rights Reserved.
+  Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ available for that context.
 | Step | Note | Command / Tool | Python Scripts | Ansible  |
 |:------|:----:|:---------------|:--------------:|:--------:|
 | Prepare Infrastructure Environment |  | [Build LPAR](./PREREQUISITES.md#preparation-steps-on-the-build-lpar),  [NFS Server](./PREREQUISITES.md#setting-up-the-nfs-server), [Red Hat OpenShift Container Platform](./PREREQUISITES.md#red-hat-openshift-container-platform) and [Reference SAP System](./PREREQUISITES.md#reference-sap-system)| :yellow_circle: | :yellow_circle: |
-| [Clone Repository](./PREREQUISITES.md#setting-up-the-clone-repository) | |[```git clone github.com/IBM/containerization-for-sap-s4hana.git```](https://github.com/IBM/containerization-for-sap-s4hana.git) |:yellow_circle: | :yellow_circle: |
+| [Clone Repository](./PREREQUISITES.md#setting-up-the-clone-repository) | |[```git clone https://github.com/IBM/containerization-for-sap-s4hana.git```](https://github.com/IBM/containerization-for-sap-s4hana.git) |:yellow_circle: | :yellow_circle: |
 | [Specify Ansible Settings](./ANSIBLE.md#specifying-your-settings) || ```vi vars/ocp-extra-vars.yml```| N\/A |:yellow_circle: |
 | [Setup the Ansible Inventory for the Playbook](./ANSIBLE.md#setting-up-the-inventory-for-the-playbook) || ```vi hosts; mkdir host_vars; vi host_vars/<hostname>.yaml```| N/A |:yellow_circle: |
 | [Prepare the Virtual Python Environment](./PREREQUISITES.md#preparing-the-virtual-environment) || [```tools/venv-setup```](./TOOLS.md#tool-venv-setup) | :yellow_circle: | :gear: |
@@ -91,7 +91,7 @@ helper node. It is possible to
   used to generate a new key pair for the build
   user. `tools/ssh-keys`can be used to distribute the public key and
   add it to the `authorized_keys` list on the remote system
- 
+
 :four: Only required if build does not run on the cluster helper node
 
 :five: Only required in case of a distributed reference SAP system

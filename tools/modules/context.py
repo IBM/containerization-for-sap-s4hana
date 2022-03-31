@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,11 +26,12 @@ import yaml
 
 # Local modules
 
-from modules.config   import Config
-from modules.creds    import Creds
-from modules.fail     import fail
-from modules.logger   import setupLogging
-from modules.nestedns import nestedNsToObj
+from modules.config    import Config
+from modules.creds     import Creds
+from modules.constants import getConstants
+from modules.fail      import fail
+from modules.logger    import setupLogging
+from modules.nestedns  import nestedNsToObj
 
 
 # Functions
@@ -40,7 +41,7 @@ def _printHeader(msg):
     print(f'# {sep}\n# {msg}\n# {sep}\n')
 
 
-def getContext(args, withCreds=True, withConfig=True):
+def getContext(args, withCreds=True, withConfig=True, failOnDiscoveryError=True):
     """ Get context """
 
     setupLogging(args)
@@ -50,12 +51,13 @@ def getContext(args, withCreds=True, withConfig=True):
     ctx.ar = args
     ctx.cr = None
     ctx.cf = None
+    ctx.cs = getConstants()
 
     if withCreds:
         ctx.creds = Creds(ctx)
         ctx.cr = ctx.creds.get()
         if withConfig:
-            ctx.config = Config(ctx)
+            ctx.config = Config(ctx, failOnDiscoveryError=failOnDiscoveryError)
             ctx.cf = ctx.config.getFull()
     elif withConfig:
         fail("Can't get configuration without credentials")

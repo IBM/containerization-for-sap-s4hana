@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# ------------------------------------------------------------------------
+# Copyright 2022 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+SCRIPT_PATH=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
+SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}")
+export SOOS_TOOLS_PATH=$(dirname $SCRIPT_PATH)
+
+if [[ $# == 1 && "$1" == "--add" ]]; then
+  if [[ "$(grep -c $SCRIPT_NAME ~/.bashrc)" == "0" ]]; then
+    SCRIPT_FQN=$SCRIPT_PATH/$SCRIPT_NAME
+    printf "\n# Added soos $SCRIPT_NAME ($(date))\nsource $SCRIPT_FQN\n" >> ~/.bashrc
+    echo "Added command \"source $SCRIPT_NAME\" in ~/.bashrc"
+  else
+    echo "Command \"$SCRIPT_NAME\" already found in ~/.bashrc"
+  fi
+fi
+if [[ -d $SOOS_TOOLS_PATH/tools ]]; then
+  SOOS_TOOLS_LIST=$(ls $SOOS_TOOLS_PATH/tools|grep -v -E "modules|venv-setup|codingstyle|$SCRIPT_NAME|^creds|^config")
+fi
+for TOOL in $SOOS_TOOLS_LIST; do
+eval "function soos-$TOOL()
+{ export ARGS=\$@ && sh -c 'tool-shortcut $TOOL; exit \$?'
+}"
+export -f soos-$TOOL
+done
+function tool-shortcut()
+{
+   echo "Using SOOS_TOOLS_PATH=$SOOS_TOOLS_PATH"
+   if [[ "$1" == "" ]];then
+     echo "Error: Call tool-shortcut not direct." && return 1
+   fi
+   if [[ ! -x $SOOS_TOOLS_PATH/tools/$1 ]]; then
+     echo "Error: Tool $SOOS_TOOLS_PATH/tools/$1 not found in dir $SOOS_TOOLS_PATH/tools, change environment variable SOOS_TOOLS_PATH." && return 1
+   fi
+   if [[ ! -r $SOOS_TOOLS_PATH/venv/bin/activate ]]; then
+     cd $SOOS_TOOLS_PATH && $SOOS_TOOLS_PATH/tools/venv-setup || return $?
+   fi
+   if [[ -r $SOOS_TOOLS_PATH/config.yaml ]]; then
+     if [[ -r $SOOS_TOOLS_PATH/creds.yaml ]]; then
+       cd $SOOS_TOOLS_PATH && source $SOOS_TOOLS_PATH/venv/bin/activate && \
+           $SOOS_TOOLS_PATH/tools/$1 $ARGS -c $SOOS_TOOLS_PATH/config.yaml -q $SOOS_TOOLS_PATH/creds.yaml || return $?
+     elif [[ -r $SOOS_TOOLS_PATH/creds.yaml.gpg ]]; then
+       cd $SOOS_TOOLS_PATH && source $SOOS_TOOLS_PATH/venv/bin/activate && \
+           $SOOS_TOOLS_PATH/tools/$1 $ARGS -c $SOOS_TOOLS_PATH/config.yaml -q $SOOS_TOOLS_PATH/creds.yaml.gpg || return $?
+     else
+       echo "Error: Credential file $SOOS_TOOLS_PATH/creds.yaml or $SOOS_TOOLS_PATH/creds.yaml.gpg not found, run tools/creds first." && return 1
+     fi
+   else
+     echo "Error: Config file $SOOS_TOOLS_PATH/config.yaml not found, run tools/config first." && return 1
+   fi
+}
+export -f tool-shortcut

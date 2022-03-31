@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@
   register: outmsg
   ignore_errors: true
 - debug: var=outmsg.stdout_lines
-- name: check failed venv setup
+- name: show debug message if the venv setup doesn't work
   debug: var=outmsg.stderr_lines
   failed_when: outmsg.rc != 0
   when: outmsg.rc != 0

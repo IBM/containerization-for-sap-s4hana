@@ -35,7 +35,6 @@ documentation to our project.
 - [Legal](#legal)
 - [Communication](#communication)
 - [Setup](#setup)
-- [Testing](#testing)
 - [Coding Style Guidelines](#coding-style-guidelines)
 
 </details>

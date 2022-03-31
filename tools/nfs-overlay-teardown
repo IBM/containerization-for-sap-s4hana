@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,19 +19,25 @@
 """ Tear down overlay file system on NFS server """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    # None
 
+    # Local modules
 
-# Local modules
+    from modules.args     import (
+        addArgOverlayUuid,
+        getCommonArgsParser
+    )
+    from modules.context  import getContext
+    from modules.nfstools import Overlays
+    from modules.startup  import startup
 
-from modules.args     import (
-    getCommonArgsParser,
-    addArgOverlayUuid,
-)
-from modules.context  import getContext
-from modules.nfstools import Overlays
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -63,8 +69,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

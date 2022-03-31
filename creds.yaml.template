@@ -86,13 +86,6 @@ nfs:
       required: false
       value: ''
 
-    sshid:
-      description: Absolute path to the private SSH ID file which is
-                   used for SSH connect operations from the NFS server
-                   to the SAP HANA database instance system
-      required: false
-      value: ''
-
 ocp:
   description: OpenShift Container Platform (OCP) cluster
   user:

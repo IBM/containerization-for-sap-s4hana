@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,16 +25,23 @@ import sys
 
 # Local modules
 
-# None
+from modules.times import (
+    saveCurrentTime,
+    printTimes
+)
 
 
 # Functions
 
-def fail(msg):
-    """ Print error message and exit """
+def fail(msg, exitCode=1):
+    """ Print error message and recorded times and exit """
     logging.error(msg)
     print(msg, file=sys.stderr)
-    sys.exit(1)
+
+    saveCurrentTime('Failure')
+    printTimes()
+
+    sys.exit(exitCode)
 
 
 def warn(msg):

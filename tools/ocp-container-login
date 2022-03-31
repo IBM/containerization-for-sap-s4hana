@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,24 +19,27 @@
 """ Interactively log into a container running in an OpenShift cluster """
 
 
-# Global modules
+try:
+    # Global modules
 
-import os
-import sys
+    # none
 
+    # Local modules
 
-# Local modules
+    from modules.args       import (
+        addArgContainerFlavor,
+        getCommonArgsParser,
+        addArgAppName
+    )
+    from modules.context    import getContext
+    from modules.ocp        import Ocp
+    from modules.deployment import Deployments
+    from modules.startup    import startup
 
-from modules.args    import (
-    getCommonArgsParser,
-    addArgContainerFlavor
-)
-from modules.context import getContext
-from modules.fail    import fail
-from modules.ocp     import (
-    getPodName,
-    getContainerName
-)
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -48,6 +51,7 @@ def _getArgs():
     )
 
     addArgContainerFlavor(parser, ('di', 'ascs', 'hdb'), False)
+    addArgAppName(parser)
 
     return parser.parse_args()
 
@@ -57,26 +61,14 @@ def _getArgs():
 def _main():
 
     ctx = getContext(_getArgs())
+    ocp = Ocp(ctx)
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployRunning)
+    ocp.setAppName(deployments.getValidAppName())
 
-    podName = getPodName(ctx)
-
-    if not podName:
-        fail("Cannot get the name of the pod - check if the pod is started.")
-
-    containerName = getContainerName(ctx, ctx.ar.container_flavor)
-
-    print(f"Logging into container '{containerName}' of pod '{podName}'", file=sys.stderr)
-
-    # Don't need an ocLogin() since getPodName() already performed one
-
-    os.execlp('oc', 'oc', 'exec', '-it', podName, '-c', containerName, '--', 'bash')
+    ocp.containerLogin()
 
 
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

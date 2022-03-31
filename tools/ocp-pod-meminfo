@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,28 +19,34 @@
 """ Get SAP system memory consumption information """
 
 
-# Global modules
+try:
+    # Global modules
 
-import logging
-import math
-import sys
-import time
+    import logging
+    import math
+    import time
 
+    # Local modules
 
-# Local modules
+    from modules.args       import (
+        addCommonArgsString,
+        getCommonArgsParser,
+        addArgAppName,
+        addArgLoop,
+        addArgSleepTime
+    )
+    from modules.context    import getContext
+    from modules.ocp        import Ocp
+    from modules.deployment import Deployments
+    from modules.quantity   import Quantity
+    from modules.startup    import startup
+    from modules.tools      import getTimestamp
+    from modules.fail       import fail
 
-
-from modules.args    import (
-    getCommonArgsParser,
-    addCommonArgsString
-)
-from modules.context import getContext
-from modules.ocp     import (
-    containerRun,
-    getContainerName
-)
-from modules.quantity import Quantity
-from modules.tools    import getTimestamp
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -51,34 +57,20 @@ def _getArgs():
         'Get SAP system memory consumption information'
     )
 
-    parser.add_argument(
-        '-l',
-        '--loop',
-        required = False,
-        action   = 'store_true',
-        help     = "Print information in endless loop"
-    )
-
-    parser.add_argument(
-        '-t',
-        '--sleep-time',
-        metavar  = '<sleep-time>',
-        required = False,
-        type     = int,
-        default  = 5,
-        help     = "Sleep time in seconds between two loop executions"
-    )
+    addArgAppName(parser)
+    addArgLoop(parser)
+    addArgSleepTime(parser)
 
     return parser.parse_args()
 
 
-def _getMeminfoGiB(ctx, instance):
+def _getMeminfoGiB(ocp, instance):
     # Returns a float, may return math.nan
 
-    containerName = getContainerName(ctx, instance)
+    containerName = ocp.getContainerName(instance)
     meminfoCmd    = "cat /sys/fs/cgroup/memory/memory.usage_in_bytes"
 
-    res = containerRun(ctx, containerName, meminfoCmd)
+    res = ocp.containerRun(containerName, meminfoCmd)
 
     if res.rc != 0:
         logging.debug(f"Execution of command '{meminfoCmd}' in container '{containerName}'"
@@ -123,29 +115,53 @@ def _main():
     instances = ctx.config.getContainerFlavors()
     instances.remove('init')
 
+    ocp = Ocp(ctx)
+
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployRunning)
+
+    appNames = None
+    if not ctx.ar.app_name:
+        appNames = deployments.getAppNames()
+    else:
+        appName = deployments.getValidAppName()
+        appNames = [appName]
+
+    if len(appNames) == 0:
+        fail("No running deployments found.")
+
     while True:
-        print(getTimestamp(withDecorator=True))
+        if ctx.ar.loop:
+            print(getTimestamp(withDecorator=True))
 
         print('             Used Limit   Used')
-        print('Container     GiB   GiB      %')
-        print('-'*30)
+        print('Instance      GiB   GiB      %')
+        print('='*30)
 
-        for instance in instances:
-            memUsage = _getMeminfoGiB(ctx, instance)
-            limit    = _getLimitGiB(ctx, instance)
-            _printResult(instance, memUsage, limit, memUsage * 100 / limit)
+        first = True
+
+        for appName in appNames:
+            ocp.setAppName(appName)
+
+            if not first:
+                print('-'*len('Deployment ' + appName))
+            first = False
+            print(f'App-Name   {appName}')
+            print('-'*len('Deployment ' + appName))
+
+            for instance in instances:
+                memUsage = _getMeminfoGiB(ocp, instance)
+                limit    = _getLimitGiB(ctx, instance)
+                _printResult(instance, memUsage, limit, memUsage * 100 / limit)
 
         if ctx.ar.loop:
             time.sleep(ctx.ar.sleep_time)
         else:
             break
 
+    del ocp
 
 # ----------------------------------------------------------------------
 
+
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

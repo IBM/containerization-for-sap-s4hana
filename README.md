@@ -72,6 +72,14 @@ documents:
 
 - [*Prerequisites*](docs/PREREQUISITES.md)
 
+  - Setup Red Hat OpenShift on IBM PowerVM servers managed using HMC
+
+    - Complete automated setup [*Red Hat OpenShift on IBM PowerVM servers managed using HMC*](https://github.com/ocp-power-automation/ocp4-upi-powervm-hmc) (External project)
+    or
+    - Complete setup with manual steps [*Helper Node Quickstart Install*](https://github.com/redhat-cop/ocp4-helpernode/blob/main/docs/quickstart-powervm.md) (External project)
+
+  - [*Containerization for SAP S/4HANA with Red Hat OpenShift on IBM Power Systems Virtual Servers*](docs/POWERVS.md#containerization-for-sap-s4hana-with-red-hat-openshift-on-ibm-power-systems-virtual-server)
+
 - Build and deployment options
 
   - [*Building Images and Starting Deployments from the Command
@@ -83,15 +91,19 @@ documents:
   - [*Building Images and Starting Deployments with Red Hat®
     Ansible®*](docs/ANSIBLE.md)
 
-  - [*Building images and starting deployments with Red Hat® Ansible
+  - [*Building Images and Starting Deployments with Red Hat® Ansible
     Tower®*](docs/ANSIBLE-TOWER.md)
 
 - [*Verifying and Managing the Deployment*](docs/VERIFYING-MANAGING.md)
 
 - How To
 
+  - [*Introducing Options for End-User GUI Access to the Containerized Systems*](docs/PORTFORWARD.md#introducing-options-for-end-user-gui-access-to-the-containerized-systems).
+
   - [*Connecting to the SAP® S/4HANA® Database using SAP HANA
     Studio®*](docs/HOWTO.md#connecting-to-the-sap-s4hana-database-using-sap-hana-studio)
+
+  - [*Cleaning up the Environment*](docs/CLEANUP.md#cleaning-up-the-environment)
 
 - Please refer also to this [IBM®
   Redpaper™](http://www.redbooks.ibm.com/Redbooks.nsf/RedpieceAbstracts/redp5619.html?Open)

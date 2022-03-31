@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: building INIT container image
-  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f init -v debug"
+  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f init -v {{ debug_level_ocp_tool }}"
   register: outmsg
   ignore_errors: true
 - name: cat result after building INIT container image
@@ -36,7 +36,7 @@
     state: absent
 
 - name: building NWS4 container image
-  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f nws4 -v debug"
+  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f nws4 -v {{ debug_level_ocp_tool }}"
   register: outmsg
   ignore_errors: true
 - name: cat result after building NWS4 container image
@@ -57,7 +57,7 @@
     state: absent
 
 - name: building SAP HANA container image
-  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f hdb -v debug"
+  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && cd {{path_to_ocp_tool}}/ansible && {{path_to_ocp_tool}}/tools/image-build -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml -f hdb -v {{ debug_level_ocp_tool }}"
   register: outmsg
 - name: cat result after building SAP HANA container image
   shell: "cat {{path_to_ocp_tool}}/ansible/log/*"

@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2021 IBM Corp. All Rights Reserved.
+  Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ OpenShift Container Platform.
   <summary>Table of Contents</summary>
 
 - [Reference SAP® System](#reference-sap-system)
-  - [Setting Up the rsync Tool on the SAP Reference System](#setting-up-the-rsync-tool-on-the-sap-reference-system)
   - [Using the Standard SAP HANA® Filesystem Layout](#using-the-standard-sap-hana-filesystem-layout)
 - [Red Hat OpenShift Container Platform](#red-hat-openshift-container-platform)
   - [Enabling Persistent OpenShift Registry Storage](#enabling-persistent-openshift-registry-storage)
@@ -39,13 +38,19 @@ OpenShift Container Platform.
 - [Setting up the NFS Server](#setting-up-the-nfs-server)
 - [Distributing the SSH Keys](#distributing-the-ssh-keys)
 - [Enabling Password Authentication](#enabling-password-authentication)
-- [Build and Deploy Prerequisites](#build-and-deploy-prerequisites)
-  - [Preparation Steps on the Helper Node](#preparation-steps-on-the-helper-node)
-  - [Preparation Steps on the Build LPAR](#preparation-steps-on-the-build-lpar)
-    - [Additional Packages on the Build LPAR](#additional-packages-on-the-build-lpar)
-    - [Additional Directories on the Build LPAR](#additional-directories-on-the-build-lpar)
-    - [Setting up the Clone Repository](#setting-up-the-clone-repository)
+- [Preparation Steps on the Helper Node](#preparation-steps-on-the-helper-node)
+- [Preparation Steps on the Build LPAR](#preparation-steps-on-the-build-lpar)
+  - [Additional Packages on the Build LPAR](#additional-packages-on-the-build-lpar)
+  - [Additional Directories on the Build LPAR](#additional-directories-on-the-build-lpar)
+  - [Setting up the Clone Repository](#setting-up-the-clone-repository)
+  - [Preparing for Script Execution on the Build LPAR](#preparing-for-script-execution-on-the-build-lpar)
     - [Preparing the Virtual Environment](#preparing-the-virtual-environment)
+    - [Activating the Virtual Environment](#activating-the-virtual-environment)
+  - [Preparing the Credentials File](#preparing-the-credentials-file)
+    - [Restarting the gpg-agent](#restarting-the-gpg-agent)
+  - [Preparing the Configuration File](#preparing-the-configuration-file)
+    - [Hints for the Parameters](#hints-for-the-parameters)
+    - [Specifying the Memory Requests and Limits for Containers](#specifying-the-memory-requests-and-limits-for-containers)
     - [Considerations for SSH Passphrases](#considerations-for-ssh-passphrases)
     - [Name Resolution for Red Hat OpenShift Container Platform Services](#name-resolution-for-red-hat-openshift-container-platform-services)
     - [Name Resolution for the Reference SAP System](#name-resolution-for-the-reference-sap-system)
@@ -55,39 +60,21 @@ OpenShift Container Platform.
   - [Setting up the Registry](#setting-up-the-registry)
   - [Setting up the Project](#setting-up-the-project)
   - [Setting up the Permissions](#setting-up-the-permissions)
-    - [Adding the Security Context Constraint anyuid](#adding-the-security-context-constraint-anyuid)
     - [Creating the Service Account](#creating-the-service-account)
+    - [Adding the Security Context Constraint anyuid](#adding-the-security-context-constraint-anyuid)
     - [Adding the Security Context Constraint hostmount-anyuid](#adding-the-security-context-constraint-hostmount-anyuid)
   - [Setting up the Opaque Secret](#setting-up-the-opaque-secret)
   - [Verifying Red Hat OpenShift Container Platform Settings](#verifying-red-hat-openshift-container-platform-settings)
-- [Preparing for Script Execution on the Build LPAR](#preparing-for-script-execution-on-the-build-lpar)
-  - [Activating the Virtual Environment](#activating-the-virtual-environment)
-  - [Preparing the Credentials File](#preparing-the-credentials-file)
-  - [Preparing the Configuration File](#preparing-the-configuration-file)
-    - [Hints for the Parameters:](#hints-for-the-parameters)
-    - [Specifying the Memory Requests and Limits for Containers](#specifying-the-memory-requests-and-limits-for-containers)
   - [Verifying the Configuration File](#verifying-the-configuration-file)
 
 </details>
 
 <!-- TOC-END -->
 
-> **Note:** Most of the prerequisites in this chapter are
-> prerequisites for both Python tools and Red Hat Ansible® as long as
-> not described different.
+> **Note:** The prerequisites in this chapter apply to both Python tools and
+> Red Hat Ansible® unless otherwise noted.
 
 ## Reference SAP® System
-
-### Setting Up the rsync Tool on the SAP Reference System
-
-To build the images we use the `rsync` tool to copy the files locally
-to your build LPAR.  This tool must be installed on both your build
-LPAR and your SAP reference system hosts:
-
-```
-$ rpm -qa rsync
-rsync-3.1.3-4.3.1.ppc64le
-```
 
 ### Using the Standard SAP HANA® Filesystem Layout
 
@@ -104,7 +91,13 @@ filesystem layout only:
 
 The solution requires a Red Hat OpenShift Container Platform 
 installed on an IBM® Power Systems™ infrastructure.  The solution was
-tested with the Red Hat OpenShift Container Platform version 4.7.
+tested with Red Hat OpenShift Container Platform version 4.7 and versions above.
+
+For details on the OCP installer see [OpenShift on IBM Power SystemVM servers managed using
+HMC](https://github.com/ocp-power-automation/ocp4-upi-powervm-hmc) or
+*Chapter 2.5 "Red Hat OpenShift setup with PowerVM"* in Redbook
+[*Deploying SAP Software in Red Hat OpenShift on IBM Power
+Systems*](https://www.redbooks.ibm.com/abstracts/redp5619.html).
 
 ### Enabling Persistent OpenShift Registry Storage
 
@@ -126,13 +119,6 @@ The playbook will setup the nfs-provisioner, create a NFS-share on the
 helper node, create a PV using the NFS share and claim the PV to the
 registry and add access rules.
 
-For details on the OCP installer see [OpenShift on IBM Power SystemVM
-servers managed using
-HMC](https://github.com/ocp-power-automation/ocp4-upi-powervm-hmc) or
-*Chapter 2.5 "Red Hat OpenShift setup with PowerVM"* in Redbook
-[*Deploying SAP Software in Red Hat OpenShift on IBM Power
-Systems*](https://www.redbooks.ibm.com/abstracts/redp5619.html).
-
 ### Required Users in Red Hat OpenShift Container Platform
 
 Two different user credentials are required in Red Hat OpenShift
@@ -140,9 +126,6 @@ Container Platform for preparing the environment and container
 deployment:
 
 - Red Hat OpenShift Container Platform cluster administrator
-> :warning: **If you use Ansible for automation you must use kubeadmin as
-> cluster administrator user!**
-
 
    The cluster administrator user is used to execute administration
    tasks in the OpenShift Container Platform such as
@@ -185,6 +168,10 @@ for further details.
 
 ## Setting up the NFS Server
 
+> **Note:**
+> We did all our tests running the NFS Server on our cluster helper node.
+> Therefore we recommend to use your cluster helper node as your NFS Server. 
+
 As part of the image build process, a snapshot copy of the SAP HANA
 database belonging to the reference SAP system is created. The copy is
 stored on a Network File System (NFS) server. The *hdb* container
@@ -215,7 +202,7 @@ still provided after a reboot of the NFS server:
 
 - The system and service manager `systemd` must be an integral part of
   the OS of the NFS server. (In case that the OpenShift Container
-  Platform Helper Node acts as NFS server this prerequisite is fulfilled).
+  Platform helper node acts as NFS server this prerequisite is fulfilled).
 
 Some steps of the containerization process need to be executed on the
 NFS Server with administrator permissions (root).
@@ -254,10 +241,13 @@ The following public SSH keys need to be distributed:
 |Build LPAR|\<build-user\>|NFS Server| root|
 |Build LPAR|\<build-user\>|SAP HANA DB|\<hdb-sid\>adm|
 |Build LPAR|\<build-user\>|SAP AppServer|\<sid\>adm|
-|NFS Server|root|SAP HANA DB|\<hdb-sid\>adm|
+|Build LPAR|\<build-user\>|OCP helper node|user able to connect as \<core\> user to worker nodes|
 
 The SSH keys may be distributed manually, or the distribution can be
 performed by running tool [`tools/ssh-keys`](./TOOLS.md#tool-ssh-keys)
+
+If you want to use `tools/ssh-keys` you first must follow the steps described in section 
+[*Preparing for Script Execution on the Build LPAR*](#preparing-for-script-execution-on-the-build-lpar)
 
 > :warning: **Note: If you use Ansible:**
 >
@@ -286,14 +276,12 @@ OS. When you use a SLES OS as reference SAP system host you must
 manually enable `PasswordAuthentication yes` in the configuration file
 `/etc/ssh/sshd_config` on the remote system.
 
-## Build and Deploy Prerequisites
-
-### Preparation Steps on the Helper Node
+## Preparation Steps on the Helper Node
 
 - Since some of the described actions are performed on the helper node
   of your cluster you need an account on this host.
 
-### Preparation Steps on the Build LPAR
+## Preparation Steps on the Build LPAR
 
 > :warning: It is recommended that the **build LPAR** is different
 > from the **OC cluster helper node**. It is however possible to use
@@ -302,7 +290,7 @@ manually enable `PasswordAuthentication yes` in the configuration file
 All actions described in the following need to be executed on the
 **build LPAR**
 
-#### Additional Packages on the Build LPAR
+### Additional Packages on the Build LPAR
 
 > **Note:** This section is a prerequisite for running the build with Python
 > tools. The steps in this section are automated in Ansible.
@@ -317,7 +305,7 @@ All actions described in the following need to be executed on the
   | `oc`       | Command line interface tool for Red Hat OpenShift |
   | `python3`  | Script interpreter; installed in *venv-setup* if not installed manually |
  
-#### Additional Directories on the Build LPAR
+### Additional Directories on the Build LPAR
 
 - During image build files are copied from your reference SAP system
   host to the build system. To store this data and the generated
@@ -344,9 +332,9 @@ All actions described in the following need to be executed on the
   $ ln -s /data/var/tmp /var/tmp
   ```
 
-#### Setting up the Clone Repository
+### Setting up the Clone Repository
 
-- You need a clone of qthis GitHub repository on your build
+- You need a clone of this GitHub repository on your build
   LPAR. Create the clone by logging into the build LPAR and
   running the command
 
@@ -354,12 +342,12 @@ All actions described in the following need to be executed on the
   $ git clone https://github.com/IBM/containerization-for-sap-s4hana.git
   ```
 
-- Change to the following working directory after termination of the
-  clone process:
+- After `git clone` has finished change to the working directory:
 
   ```shell
     $ cd containerization-for-sap-s4hana
   ```
+### Preparing for Script Execution on the Build LPAR
 
 #### Preparing the Virtual Environment
 
@@ -379,10 +367,130 @@ All actions described in the following need to be executed on the
   The script will setup a Python virtual environment with all the
   modules required to run the tools.
 
-- Activate the virtual environment:
+#### Activating the Virtual Environment
 
-  See section [*Activating the Virtual
-  Environment*](#activating-the-virtual-environment)
+> **Note:** This section is a prerequisite for running the build with Python tools.
+> It is automated when you execute the build using Ansible.
+
+Change to the directory of the cloned repository and activate the
+virtual environment:
+
+  ```shell
+  $ cd containerization-for-sap
+  $ source venv/bin/activate
+  ```
+
+### Preparing the Credentials File
+
+> **Note:** This section is a prerequisite for running the build with Python tools.
+> It is automated when you execute the build using Ansible.
+
+The credentials file contains information about the user credentials of the 
+- Reference SAP system
+  - OS User credentials for SAP and SAP HANA instances
+  - ABAP Connect User
+- Red Hat OpenShift Container Platform
+  - Cluster admin
+  - Project user
+- NFS server admin
+
+Tool [`creds`](./TOOLS.md#tool-creds) is available to
+  - interactively create a new encrypted credentials file (`-n`)
+  - interactively edit an existing encrypted credentials file (`-e`)
+  - dump the contents of an existing encrypted credentials file (`-d`)
+
+Create a new credentials file using 
+```shell
+$ tools/creds -n 
+```
+and supply all the credentials information as requested.
+
+The credentials file is encrypted using GPG.
+
+- If you specify a GPG key via the recipient option (`-r`), then
+  asymmetric encryption is used. You can generate a GPG key for the
+  build user in advance e.g. using
+  [`gpg-key-gen`](./TOOLS.md#tool-gpg-key-gen).
+
+- If no GPG key is specified, then symmetric encryption is used.
+
+> :warning: **Always use a copy of the `creds.yaml.template` as your credentials file!**
+
+#### Restarting the gpg-agent
+When you use an encrypted credentials file and encounter problems with starting 
+tools stop the `gpg-agent` by issuing 
+```shell
+$ gpgconf --kill gpg-agent
+```
+
+The `gpg-agent` will automatically restart when the encrypted credentials file is accessed next time.
+
+### Preparing the Configuration File
+
+> **Note:** This section is a prerequisite for running the build with Python tools.
+> It is automated when you execute the build using Ansible.
+
+The configuration file contains all information about the reference
+SAP system, the Red Hat OpenShift Container Platform and the NFS
+server which is required to build the container images and deploy and
+run them in your cluster.
+
+You can create your configuration file in two ways:
+
+- By copying the configuration file template named
+  [`config.yaml.template`](../config.yaml.template). This template is
+  located in the root directory of your repository clone.  Copy the
+  file to a new file named `config.yaml` in the root directory of your
+  repository clone and adapt it as needed.  Explanations of the
+  various parameters are provided in the configuration file
+  template.
+
+> :warning: **Always use a copy of the `config.yaml.template` as your configuration file!**
+
+- By executing
+
+  ```shell
+  $ tools/config -n 
+  ```
+
+  and supplying all parameters as requested. 
+
+#### Hints for the Parameters
+
+- In case the SAP system is installed with virtual hostnames:
+
+  Enter the virtual hostname ("SAPLOCALHOST") of the SAP instance as
+  `refsys.nws4.host.name`
+
+- Do not specify the fully qualified domain name as hostname. Use the short
+hostname instead.
+
+#### Specifying the Memory Requests and Limits for Containers
+
+The memory resources *requests* and *limits* are used for setting up the container memory resources.
+For more information on how to setup the memory requests see:
+https://kubernetes.io/docs/concepts/configuration/manage-resources-containers
+
+If you do not specify a value for the `resources.limits.memory` or the
+`resources.requests.memory`, default values are used:
+
+Container Type | Default Size
+------------ | -------------
+ASCS | 10Gi
+DI | Value of `PHYS_MEMSIZE` in SAP instance profile, if not available: 10% of the total memory of the reference SAP system host. 
+SAP HANA DB | Calculated from the original size of the reference SAP system
+
+> :warning: **The value of `resources.limits.memory` must be at least
+> the size of the `resources.requests.memory`.  If you do not specify
+> a value for `resources.limits.memory` and the calculated size is
+> less than the specified value for `resources.requests.memory`,
+> generation of the deployment file using tool
+> [`ocp-deployment gen-yaml`](./TOOLS.md#tool-ocp-deployment) fails.
+> Use the [`verify-config`](./TOOLS.md#tool-verify-config) tool to
+> make sure that your memory settings are valid.**
+
+
+
 
 #### Considerations for SSH Passphrases
 
@@ -440,17 +548,30 @@ All actions described in the following need to be executed on the
   
 ### Additional Prerequisites for Reference Systems Running on SLES
 
-If your reference SAP system runs on a SuSE distribution and your SAP
-HANA DB SP Level is higher than 49, you need either access to the
+Newer SAP HANA releases may require additional GCC C++ runtime
+compatibility libraries. Package `compat-sap-c++`, part of the  
+**Red Hat Enterprise Linux for SAP Solutions** subscription
+`rhel-8-for-ppc64le-sap-netweaver-rpms`, provides the additional
+library packages. These libraries are installed independently
+to the standard GCC runtime libraries in RHCOS.
 
-- `rhel-8-for-ppc64le-sap-netweaver-rpms`
+| SAP HANA 2.0 SP Level | compatibility library |
+|:----------------------|:-------------------------------|
+| up to SAP HANA 2.0 SPS 04   |none                |
+| SAP HANA 2.0 SPS 05   |`compat-sap-c++-9`  |
+| SAP HANA 2.0 SPS 06   |`compat-sap-c++-10` |
 
-subscription on your build LPAR or you have to provide the rpm file
-
-- `compat-sap-c++-9-9.1.1-2.2.el8.ppc64le.rpm`
-
+If your reference SAP system has a SAP HANA 2.0 SP Level 5 and above,
+you need to provide the appropriate rpm fileset for `compat-sap-c++`
 in the default directory `/tmp/soos/rpm-packages/` on your build
 LPAR.
+
+The table below lists the required rpm packages:
+
+| SAP HANA 2.0 SP Level | compatibility library |
+|:----------------------|:-------------------------------|
+| SAP HANA 2.0 SPS 05   |`compat-sap-c++-9-9.1.1-2.2.el8.ppc64le.rpm`  |
+| SAP HANA 2.0 SPS 06   |`compat-sap-c++-10-10.2.1.1.el8_2.ppc64le.rpm` |
 
 ## Red Hat OpenShift Container Platform Prerequisites
 
@@ -534,14 +655,31 @@ a service account with appropriate SCCs.
 Necessary steps to grant those permissions are described in the
 following.
 
-Logon into the Red Hat OpenShift Container Platform cluster as cluster
-administrator
+#### Creating the Service Account
 
-  ```shell
-$ tools/ocp-login -a 
-  ```
+To create the service account proceed as follows:
 
-before you execute the steps below.
+  - Run the command
+
+    ```shell
+    $ tools/ocp-service-account-gen
+    ```
+
+    to generate the service account in your Openshift Container Platform project.
+
+    You require both a valid credentials file and a valid
+    configuration file for running
+    [`ocp-service-account-gen`](./TOOLS.md#tool-ocp-service-account-gen)
+    (see sections [*Preparing the credentials
+    file*](#preparing-the-credentials-file) and [*Preparing the
+    configuration file*](#preparing-the-configuration-file)).
+
+> **Note:** Logon into the Red Hat OpenShift Container Platform cluster
+> as cluster administrator
+>   ```shell
+> $ tools/ocp-login -a 
+>   ```
+> before you execute the steps below.
 
 #### Adding the Security Context Constraint anyuid
   
@@ -553,31 +691,6 @@ Run
 
 to add the SCC *anyuid* to the group.
 
-#### Creating the Service Account
-
-To create the service account proceed as follows:
-
-  - Run the command
-
-    ```shell
-    $ tools/ocp-service-account-gen
-    ```
-
-    to generate the file `<ocp-project-name>-service-account.yaml` in
-    the root directory of your repository clone.
-
-    You require both a valid credentials file and a valid
-    configuration file for running
-    [`ocp-service-account-gen`](./TOOLS.md#tool-ocp-service-account-gen)
-    (see sections [*Preparing the credentials
-    file*](#preparing-the-credentials-file) and [*Preparing the
-    configuration file*](#preparing-the-configuration-file)).
-
-  - Apply the file to the Red Hat OpenShift Container Platform
-
-    ```shell
-    $ oc apply -f <ocp-project-name>-service-account.yaml
-    ```
 #### Adding the Security Context Constraint hostmount-anyuid
 
 The SAP HANA container mounts the database `data/`- and
@@ -639,119 +752,6 @@ file for running
 sections [*Preparing the credentials
 file*](#preparing-the-credentials-file) and [*Preparing the
 configuration file*](#preparing-the-configuration-file)).
-
-## Preparing for Script Execution on the Build LPAR
-
-### Activating the Virtual Environment
-
-> **Note:** This section is a prerequisite for running the build with Python tools.
-> It is automated when you execute the build using Ansible.
-
-Change to the directory of the cloned repository and activate the
-virtual environment:
-
-  ```shell
-  $ cd containerization-for-sap
-  $ source venv-setup/bin/activate
-  ```
-
-### Preparing the Credentials File
-
-> **Note:** This section is a prerequisite for running the build with Python tools.
-> It is automated when you execute the build using Ansible.
-
-The credentials file contains information about the user credentials of the 
-- Reference SAP system
-  - OS User credentials for SAP and SAP HANA instances
-  - ABAP Connect User
-- Red Hat OpenShift Container Platform
-  - Cluster admin
-  - Project user
-- NFS server admin
-
-Tool [`creds`](./TOOLS.md#tool-creds) is available to
-  - interactively create a new encrypted credentials file (`-n`)
-  - interactively edit an existing encrypted credentials file (`-e`)
-  - dump the contents of an existing encrypted credentials file (`-d`)
-
-Create a new credentials file using 
-```shell
-$ tools/creds -n 
-```
-and supply all the credentials information as requested.
-
-The credentials file is encrypted using GPG.
-
-- If you specify a GPG key via the recipient option (`-r`), then
-  asymmetric encryption is used. You can generate a GPG key for the
-  build user in advance e.g. using
-  [`gpg-key-gen`](./TOOLS.md#tool-gpg-key-gen).
-
-- If no GPG key is specified, then symmetric encryption is used.
-
-> :warning: **You must not use the `credentials.yaml.template` as your credentials file!**
-
-### Preparing the Configuration File
-
-> **Note:** This section is a prerequisite for running the build with Python tools.
-> It is automated when you execute the build using Ansible.
-
-The configuration file contains all information about the reference
-SAP system, the Red Hat OpenShift Container Platform and the NFS
-server which is required to build the container images and deploy and
-run them in your cluster.
-
-You can create your configuration file in two ways:
-
-- By copying the configuration file template named
-  [`config.yaml.template`](../config.yaml.template). This template is
-  located in the root directory of your repository clone.  Copy the
-  file to a new file named `config.yaml` in the root directory of your
-  repository clone and adapt it as needed.  Explanations of the
-  various parameters are provided in the configuration file
-  template.
-
-- By executing
-
-  ```shell
-  $ tools/config -n 
-  ```
-
-  and supplying all parameters as requested. 
-
-#### Hints for the Parameters:
-
-- In case the SAP system is installed with virtual hostnames:
-
-  Enter the virtual hostname ("SAPLOCALHOST") of the SAP instance as
-  `refsys.nws4.host.name`
-
-#### Specifying the Memory Requests and Limits for Containers
-
-The memory resources *requests* and *limits* are used for setting up the container memory resources.
-For more information on how to setup the memory requests see:
-https://kubernetes.io/docs/concepts/configuration/manage-resources-containers
-
-If you do not specify a value for the `resources.limits.memory` or the
-`resources.requests.memory`, default values are used:
-
-Container Type | Default Size
------------- | -------------
-ASCS | 10Gi
-DI | Value of `PHYS_MEMSIZE` in SAP instance profile, if not available: 10% of the total memory of the reference SAP system host. 
-SAP HANA DB | Calculated from the original size of the reference SAP system
-
-> :warning: **The value of `resources.limits.memory` must be at least
-> the size of the `resources.requests.memory`.  If you do not specify
-> a value for `resources.limits.memory` and the calculated size is
-> less than the specified value for `resources.requests.memory`,
-> generation of the deployment file using tool
-> [`ocp-deployment-gen`](./TOOLS.md#tool-ocp-deployment-gen) fails.
-> Use the [`verify-config`](./TOOLS.md#tool-verify-config) tool to
-> make sure that your memory settings are valid.**
-
-
-> :warning: **You must not use the `config.yaml.template` as your configuration file!**
 
 ### Verifying the Configuration File
 

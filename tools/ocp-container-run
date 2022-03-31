@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,22 +19,31 @@
 """ Run a command in a container running in an OpenShift cluster """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    import sys
 
+    # Local modules
 
-# Local modules
+    from modules.args    import (
+        addArgContainerFlavor,
+        getCommonArgsParser,
+        addArgAppName
+    )
+    from modules.context    import getContext
+    from modules.ocp        import Ocp
+    from modules.startup    import startup
+    from modules.deployment import Deployments
+    from modules.times      import (
+        printTimes,
+        saveEndTime
+    )
 
-from modules.args    import (
-    getCommonArgsParser,
-    addArgContainerFlavor
-)
-from modules.context import getContext
-from modules.ocp     import (
-    containerRun,
-    getContainerName
-)
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -46,6 +55,7 @@ def _getArgs():
     )
 
     addArgContainerFlavor(parser, ('di', 'ascs', 'hdb'), False)
+    addArgAppName(parser)
 
     parser.add_argument('command',
                         help='Command to be executed inside the container'
@@ -60,25 +70,30 @@ def _main():
 
     ctx = getContext(_getArgs())
 
-    containerName = getContainerName(ctx, ctx.ar.container_flavor)
+    ocp = Ocp(ctx)
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployRunning)
+    ocp.setAppName(deployments.getValidAppName())
+    containerName = ocp.getContainerName(ctx.ar.container_flavor)
+    podName       = ocp.getPodName()
     command       = ctx.ar.command
 
-    print(f"Executing command '{command}' in container '{containerName}'",
+    print(f"Executing command '{command}' in container '{containerName}' of pod '{podName}'",
           file=sys.stderr)
 
-    res = containerRun(ctx, containerName, command)
+    res = ocp.containerRun(containerName, command)
 
     print(res.out, file=sys.stdout)
     print(res.err, file=sys.stderr)
 
-    sys.exit(res.rc)
+    del ocp
+
+    saveEndTime()
+    printTimes()
+
+    return res.rc
 
 
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ build:
       description: Path to the root directory of the repository clone
                    on the build machine
       required: true
-      value: {{ path_to_ocp_tool }}
+      value: '{{ path_to_ocp_tool }}'
 
 refsys:
   description: Reference SAP NetWeaver or SAP S/4HANA system
@@ -31,14 +31,14 @@ refsys:
     sid:
       description: SAP system ID
       required: true
-      value: {{ nws4_sid }}
+      value: '{{ nws4_sid | upper }}'
 
     host:
       description: Host on which the system is installed
       name:
         description: Name of the host
         required: true
-        value: {{ nws4_host_name }}
+        value: '{{ nws4_host_name }}'
 
 ocp:
   description: OpenShift Container Platform (OCP) cluster
@@ -46,12 +46,12 @@ ocp:
     description: Project under which the generated images
                  are stored and the containers are started
     required: true
-    value: {{ ocp_project_name }}
+    value: '{{ ocp_project_name }}'
 
   domain:
     description: Cluster domain name (used for 'oc' operations)
     required: true
-    value: {{ ocp_cluster_domain }}
+    value: '{{ ocp_cluster_domain }}'
 
   helper:
     description: Cluster helper node
@@ -61,7 +61,7 @@ ocp:
         description: Name of the host as seen in the intranet
           (*not* in the cluster network)
         required: true
-        value: {{ ocp_helper_node }}
+        value: '{{ ocp_helper_node }}'
 
   containers:
     description: Container instances
@@ -73,19 +73,19 @@ ocp:
                      are stored for use within the Pod; 
                      *required* if the reference system is not a standard system
         required: false
-        value: {{ containers_di_secret }}
+        value: '{{ containers_di_secret }}'
 
       resources:
         requests:
           memory:
             description: Requested memory
             required: false
-            value: {{ containers_di_requests_memory }}
+            value: '{{ containers_di_requests_memory }}'
         limits:
           memory:
             description: Memory limit; must be >= requested memory
             required: false
-            value: {{ containers_di_limits_memory }}
+            value: '{{ containers_di_limits_memory }}'
 
     ascs:
       description: SAP ASCS instance
@@ -94,12 +94,12 @@ ocp:
           memory:
             description: Requested memory
             required: true
-            value: {{ containers_ascs_requests_memory }}
+            value: '{{ containers_ascs_requests_memory }}'
         limits:
           memory:
             description: Memory limit; must be >= requested memory
             required: true
-            value: {{ containers_ascs_limits_memory }}
+            value: '{{ containers_ascs_limits_memory }}'
 
     hdb:
       description: SAP HANA instance
@@ -109,14 +109,14 @@ ocp:
             description: Requested memory; will be derived from the
                          original database size if not supplied
             required: false
-            value: {{ containers_hdb_requests_memory }}
+            value: '{{ containers_hdb_requests_memory }}'
         limits:
           memory:
             description: Memory limit; must be >= requested memory;
                          will be derived from the original database
                          size if not supplied
             required: false
-            value: {{ containers_hdb_limits_memory }}
+            value: '{{ containers_hdb_limits_memory }}'
 
 nfs:
   description: NFS server
@@ -126,7 +126,7 @@ nfs:
       description: Name of host; if not specified
                    ocp.helper.host.name is used
       required: false
-      value: {{ nfs_host_name }}
+      value: '{{ nfs_host_name }}'
 
   bases:
     description: Base directories
@@ -134,10 +134,10 @@ nfs:
       description: Path where directories {data,log} of the original
                    SAP HANA system are copied to
       required: true
-      value: {{ nfs_path_to_hdb_copy }}
+      value: '{{ nfs_path_to_hdb_copy }}'
 
     overlay:
       description: Path under which overlay file systems for container
                    instances are created
       required: true
-      value: {{ nfs_path_to_overlay }}
+      value: '{{ nfs_path_to_overlay }}'

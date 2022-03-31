@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,34 @@
 # required to run the tools in directory tools/
 
 set -euo pipefail
+
+function gen_doc_gfm() {
+
+    cat <<'EOF'
+## Tool `venv-setup`
+
+### Usage
+
+`venv-setup`
+
+### Purpose
+
+Set up a Python virtual environment with all modules that are required
+to run the tools.
+
+Once the virtual environment is prepared, activate it by executing
+`source venv/bin/activate` out of the repository clone root directory
+before running any of the other tools.
+
+EOF
+}
+
+if [ $# -eq 1 ]; then
+    if [ $1 == '--gen-doc-gfm' ]; then
+	gen_doc_gfm
+	exit 0
+    fi
+fi
 
 if [ $# -ge 1 ]; then
     echo

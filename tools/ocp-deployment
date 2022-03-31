@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2022 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" Deployment handling  """
+
+
+try:
+    # Global modules
+
+    # Local modules
+
+    from modules.args     import (
+        getCommonArgsParser,
+        addCommonArgsString,
+        addArgAdditionalDeployments,
+        addArgAppName,
+        addArgOverlayUuid
+    )
+
+    from modules.context    import getContext
+    from modules.startup    import startup
+    from modules.fail       import fail
+    from modules.deployment import Deploy
+    from modules.constants  import getConstants
+
+
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
+
+
+# Functions
+
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Deployment handling'
+    )
+    addArgAdditionalDeployments(parser)
+    addArgAppName(parser)
+    addArgOverlayUuid(parser, required=False)
+    const = getConstants()
+
+    missingAppNameHelp  = f"If the --{const.argAppName} "
+    missingAppNameHelp += "parameter is missing and more than one deployed "
+    missingAppNameHelp += "app name is found, an error is shown."
+
+    addHelp     = "Add deployments. You can specify the number of addtional "
+    addHelp    += f"deployments using the --{const.argNumber} parameter."
+
+    removeHelp  = "Removes a deployment. This option \n"
+    removeHelp += "- stops the deployment\n"
+    removeHelp += "- tears down the NFS Overlay Share\n"
+    removeHelp += "- and deletes the deployment description file.\n"
+    removeHelp += missingAppNameHelp
+
+    startHelp   = "Starts a deployment.\n"
+    startHelp  += missingAppNameHelp
+
+    stopHelp   = "Stops a deployment.\n"
+    stopHelp  += missingAppNameHelp
+
+    genYamlHelp  = "Generates a deployment description file.\n"
+    genYamlHelp += f"Requires an overlayUuid specified by --{const.argOverlayUuid}"
+
+    deploymentHelp  = "Deployment description file. \n"
+    deploymentHelp += f"Can be specified either with option --{const.argStart} or "
+    deploymentHelp += f"--{const.argStop} instead of specifying --{const.argAppName}"
+
+    parser.add_argument(
+        f'--{const.argAdd}',
+        required = False,
+        action   = 'store_true',
+        help     = addHelp
+    )
+
+    parser.add_argument(
+        f'--{const.argRemove}',
+        required = False,
+        action   = 'store_true',
+        help     = removeHelp
+    )
+
+    parser.add_argument(
+        f'--{const.argList}',
+        required = False,
+        action   = 'store_true',
+        help     = "Lists the information of all available deployments"
+    )
+
+    parser.add_argument(
+        f'--{const.argStart}',
+        required = False,
+        action   = 'store_true',
+        help     = startHelp
+    )
+
+    parser.add_argument(
+        f'--{const.argStop}',
+        required = False,
+        action   = 'store_true',
+        help     = stopHelp
+    )
+
+    parser.add_argument(
+        f'--{const.argGenYaml}',
+        required = False,
+        action   = 'store_true',
+        help     = genYamlHelp
+    )
+
+    parser.add_argument(
+        '-f',
+        f'--{const.argDeploymentFile}',
+        metavar  = f'<{const.argDeploymentFile}>',
+        required = False,
+        default  = None,
+        help     = deploymentHelp
+    )
+
+    return parser.parse_args()
+
+
+def _checkArgs(ctx):
+    noOfOptions = 0
+
+    if ctx.ar.start:
+        noOfOptions += 1
+    if ctx.ar.stop:
+        noOfOptions += 1
+    if ctx.ar.add:
+        noOfOptions += 1
+    if ctx.ar.remove:
+        noOfOptions += 1
+    if ctx.ar.list:
+        noOfOptions += 1
+    if ctx.ar.gen_yaml:
+        noOfOptions += 1
+
+    if noOfOptions == 1:
+        if ctx.ar.gen_yaml and not ctx.ar.overlay_uuid:
+            msg  = "You wanted to generate a deployment description file "
+            msg += f"without specifying an overlay uuid using the --{ctx.cs.argOverlayUuid} "
+            msg += "option."
+            fail(msg)
+        if ctx.ar.remove and not ctx.ar.app_name:
+            msg  = "You wanted to remove a complete deployment "
+            msg += f"without specifying an app name using the --{ctx.cs.argAppName} "
+            msg += "option.\n"
+            fail(msg)
+        return
+
+    msg = "You did not specify an option.\n"
+
+    if noOfOptions > 1:
+        msg = "You specified more than one option.\n"
+
+    msg += "Execute tools/ocp-deployment --help for more information"
+    fail(msg)
+
+
+# ----------------------------------------------------------------------
+
+
+def _main():
+
+    ctx = getContext(_getArgs())
+    addCommonArgsString(ctx)
+
+    _checkArgs(ctx)
+
+    if ctx.ar.start:
+        # Starts a deployment
+        deploy = Deploy(ctx, deploymentType = ctx.cs.deployNotDeployed)
+        deploy.start()
+        del deploy
+        return
+
+    if ctx.ar.stop:
+        # Stops a deployment
+        deploy = Deploy(ctx, deploymentType = ctx.cs.deployDeployed)
+        deploy.stop()
+        del deploy
+        return
+
+    if ctx.ar.add:
+        # Adds given numbers of deployments
+        number = 1
+        if ctx.ar.number:
+            number = ctx.ar.number
+        deploy = Deploy(ctx, initDeployments = False)
+        deploy.add(number)
+        del deploy
+        return
+
+    if ctx.ar.gen_yaml:
+        # generates a deployment description file
+        deploy = Deploy(ctx, initDeployments = False)
+        deploy.genYaml(ctx.ar.overlay_uuid)
+        del deploy
+        return
+
+    if ctx.ar.remove:
+        # Removes a deployment
+        deploy = Deploy(ctx, deploymentType = ctx.cs.deployAll)
+        deploy.remove()
+        del deploy
+        return
+
+    if ctx.ar.list:
+        # Lists deployment informations
+        deploy = Deploy(ctx, deploymentType = ctx.cs.deployAll)
+        deploy.list()
+        del deploy
+        return
+
+# ----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+    startup(_main)

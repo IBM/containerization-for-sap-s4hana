@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,40 +19,96 @@
 """ Get the status of a pod """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    import time
 
+    # Local modules
 
-# Local modules
+    from modules.args       import (
+        getCommonArgsParser,
+        addArgAppName,
+        addArgLoop,
+        addArgSleepTime
+    )
+    from modules.context    import getContext
+    from modules.ocp        import Ocp
+    from modules.deployment import Deployments
+    from modules.startup    import startup
+    from modules.tools      import getTimestamp
+    from modules.fail       import fail
 
-from modules.args    import getCommonArgs
-from modules.context import getContext
-from modules.ocp     import (
-    getPodName,
-    getPodStatus
-)
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
 
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Get the status of a pod'
+    )
+    addArgAppName(parser)
+    addArgLoop(parser)
+    addArgSleepTime(parser)
+    return parser.parse_args()
+
+
+def _printHeader():
+    print('Pod' + ' '*40 + 'Status')
+    print('-'*50)
 
 # ----------------------------------------------------------------------
 
+
 def _main():
 
-    ctx = getContext(getCommonArgs(
-        'Get the status of a pod'
-    ))
+    ctx = getContext(_getArgs())
 
-    print(f"Status of pod '{getPodName(ctx)}': {getPodStatus(ctx)}")
+    ocp = Ocp(ctx)
+
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployDeployed)
+
+    appNames = None
+
+    if not ctx.ar.app_name:
+        appNames = deployments.getAppNames()
+    else:
+        appName = deployments.getValidAppName()
+        appNames = [appName]
+
+    if len(appNames) == 0:
+        fail("No deployments found.")
+
+    while True:
+        if ctx.ar.loop:
+            print(getTimestamp(withDecorator=True))
+        _printHeader()
+
+        if len(appNames) > 0:
+            for appName in appNames:
+                ocp.setAppName(appName)
+                podName   = ocp.getPodName()
+                podStatus = ocp.getPodStatus()
+
+                if not podName:
+                    print(f"No pod found for {appName}")
+                else:
+                    print(f'{podName}' + ' '*7 + f'{podStatus}')
+        else:
+            print("None")
+            break
+        if ctx.ar.loop:
+            time.sleep(ctx.ar.sleep_time)
+        else:
+            break
 
 
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

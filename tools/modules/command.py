@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,11 +29,11 @@ import types
 
 # Local modules
 
-from modules.messages import (
-    formatMessageParagraphs,
-    formatMessageList
-)
 from modules.fail     import fail
+from modules.messages import (
+    formatMessageList,
+    formatMessageParagraphs
+)
 
 
 # Classes
@@ -187,9 +187,11 @@ class CmdSsh(Command):
         super().__init__()
 
         self._cmdShell = CmdShell()
+        self._sshId         = None
 
         if not sshId:
             sshId = ctx.cr.build.user.sshid
+            self._sshId = sshId
 
         if sshId:
             logging.debug(f"Using SSH ID '{sshId}'")
@@ -211,49 +213,51 @@ class CmdSsh(Command):
             logging.debug(f"Connecting to host '{hostname}'")
 
             res = self.run('true')
-
             if res.rc != 0:
-                logging.debug(f"Got SSH error: '{res.err}'")
-
-                thisUser = getpass.getuser()
-                thisHost = socket.gethostname()
-                width = 67
-                msg = formatMessageParagraphs([
-                    "Got SSH error when trying to establish connection",
-                    '',
-                    f"'{thisUser}@{thisHost}' → '{user.name}@{hostname}'.",
-                    '',
-                    '>>> Error message >>>',
-                    '',
-                    f"{res.err}",
-                    '',
-                    '<<< Error message <<<',
-                    '',
-                    f"Please make sure that the SSH public key"
-                    f" of user '{thisUser}' on host '{thisHost}'"
-                    f" is part of the 'authorized_keys' file"
-                    f" of user '{user.name}' on host '{hostname}'"
-                    f" by executing",
-                    '',
-                    f"   ssh-copy-id {user.name}@{hostname}",
-                    '',
-                    f"as user '{thisUser}' on host '{thisHost}' and"
-                ], width-2, ' ', 1)
-                msg += '\n\n'
-                msg += formatMessageList([
-                    'either rerun this command in an ssh-agent session',
-                    '',
-                    f"or remove the passphrase from the private key"
-                    f" of user '{thisUser}' on host '{thisHost}'"
-                    f" and rerun this command."
-                ], width-2, ' ', 1)
-                msg = '-'*width+f'\n{msg}\n'+'-'*width+'\n'
-
+                msg = self.formatSshError(res, hostname, user)
                 fail(msg)
+
+    def formatSshError(self, res, hostname, user):
+        """ return formatted ssh error """
+        logging.debug(f"Got SSH error: '{res.err}'")
+
+        thisUser = getpass.getuser()
+        thisHost = socket.gethostname()
+        width = 67
+        msg = formatMessageParagraphs([
+            "Got SSH error when trying to establish connection",
+            '',
+            f"'{thisUser}@{thisHost}' → '{user.name}@{hostname}'.",
+            '',
+            '>>> Error message >>>',
+            '',
+            f"{res.err}",
+            '',
+            '<<< Error message <<<',
+            '',
+            f"Please make sure that the SSH public key"
+            f" of user '{thisUser}' on host '{thisHost}'"
+            f" is part of the 'authorized_keys' file"
+            f" of user '{user.name}' on host '{hostname}'"
+            f" by executing",
+            '',
+            "   ./tools/ssh-keys --add-keys",
+            '',
+            f"as user '{thisUser}' on host '{thisHost}' and"
+        ], width-2, ' ', 1)
+        msg += '\n\n'
+        msg += formatMessageList([
+            'rerun this command in an ssh-agent session',
+            '',
+            f"or remove the passphrase from the private key"
+            f" of user '{thisUser}' on host '{thisHost}'"
+            f" and rerun this command."
+        ], width-2, ' ', 1)
+        msg = '-'*width+f'\n{msg}\n'+'-'*width+'\n'
+        return msg
 
     def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False):
         """ Execute a command on a remote host using SSH """
-
         if secrets:
             cmd = Command._shiftSecrets(cmd, secrets, len(self._sshCmdSecrets))
         else:
@@ -272,3 +276,11 @@ class CmdSsh(Command):
             sshCmd += f' {self._sshLogin}'
 
         return sshCmd, self._sshCmdSecrets
+
+    def passwordNeeded(self):
+        """ True if password must be entered for ssh connection """
+        cmd = "ssh "
+        if self._sshId:
+            cmd += f"-i {self._sshId} "
+        cmd += f"-o PasswordAuthentication=no -o BatchMode=yes {self._sshLogin} 'exit'"
+        return self._cmdShell.run(cmd).rc > 0

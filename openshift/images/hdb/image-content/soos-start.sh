@@ -65,6 +65,8 @@ if [ ! -e /root/soos-hdblcm.cfg ]; then
     echo "Replacing patterns in hdblcm configfile"
     sed \
         -e "s|{{SOOS_HDB_BASE_DIR}}|${SOOS_HDB_BASE_DIR}|g" \
+        -e "s|{{SOOS_HDB_BASE_DATA_DIR}}|${SOOS_HDB_BASE_DATA_DIR}|g" \
+        -e "s|{{SOOS_HDB_BASE_LOG_DIR}}|${SOOS_HDB_BASE_LOG_DIR}|g" \
         -e "s|{{SOOS_HDB_HOST}}|${SOOS_HDB_HOST}|g" \
         -e "s|{{SOOS_HDB_RENAME}}|${SOOS_GLOBAL_HDB_RENAME}|g" \
         /root/soos-hdblcm.tmp > /root/soos-hdblcm.cfg
