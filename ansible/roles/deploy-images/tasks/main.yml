@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: generating the deployment file {{ deployment_file }} using {{ uuid_value }}
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment-gen -c ./config.yaml -q ./creds.yaml -u {{ uuid_value }} -o ./{{ deployment_file }}"
+- name: generating the deployment file using {{ overlay_share_name }}
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment --gen-yaml -c ./config.yaml -q ./creds.yaml -u {{ overlay_share_name }}"
   register: outmsg
 - debug: var=outmsg.stdout
-- import_tasks: ../../../tasks/oc-user-login.yml
+- set_fact: 
+    deployment_file: "soos-{{ nws4_sid | lower}}-{{ uuid_value }}-deployment.yaml" 
 # start deployment 
 - name: apply the deployment file {{ deployment_file }}
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && oc apply -f ./{{ deployment_file }}"
-
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment --start -f ./{{ deployment_file }} -c ./config.yaml -q ./creds.yaml "
 - import_tasks: ../../../tasks/wait_for_pod_running.yml
 - name: show pod mem info
   shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-pod-meminfo -c ./config.yaml -q ./creds.yaml"

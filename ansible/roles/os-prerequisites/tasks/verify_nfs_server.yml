@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 # ------------------------------------------------------------------------
 
 # check NFS server connections
-- name: Failed  connection to NFS server
+- name: show status of NFS user name and OCP helper node
   fail:
     msg: "NFS user name and OCP helper node must be defined"
   when: ocp_helper_node == '' and nfs_user_name == ''
@@ -28,17 +28,3 @@
 - name: check ssh connection to NFS server on a helper node {{ nfs_user_name }}@{{ ocp_helper_node }}
   shell: "ssh -o StrictHostKeyChecking=no {{ ocp_helper_node_user_name }}@{{ ocp_helper_node }} ls"
   when: nfs_host_name == ''
-
-- name: check ssh connection from NFS server to SAP reference system LPAR {{ nws4_sidadm_name }}@{{ nws4_host_name }}
-  shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user_name }}@{{ nfs_host_name }} 'ssh -o StrictHostKeyChecking=no {{ nws4_sidadm_name }}@{{ nws4_host_name }} cat /usr/sap/sapservices'"
-  register: outmsg_ssh
-  when: nfs_host_name != ''
-
-- name: check ssh connection from NFS server to SAP reference system LPAR {{ nws4_sidadm_name }}@{{ nws4_host_name }}
-  shell: "ssh -o StrictHostKeyChecking=no {{ ocp_helper_node_user_name }}@{{ ocp_helper_node }} 'ssh -o StrictHostKeyChecking=no {{ nws4_sidadm_name }}@{{ nws4_host_name }} cat /usr/sap/sapservices'"
-  register: outmsg_ssh
-  when: nfs_host_name == ''
-
-- name: show /usr/sap/sapservices file content
-  debug: var=outmsg_ssh.stdout_lines
-

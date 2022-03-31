@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -59,14 +59,10 @@
 - name: generate ocp service-account
   shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-service-account-gen -c ./config.yaml -q ./creds.yaml -o {{path_to_ocp_tool}}/{{ocp_project_name}}-service-account.yaml -w"
   register: out_b
-- name: show where the file {{ocp_project_name}}-service-account.yaml is created 
+- name: show output after generating oc service account  
   debug: var=out_b.stdout
 
-- name: generate the service account {{ocp_project_name}}-service-account.yaml
-  shell: "oc apply -f {{path_to_ocp_tool}}/{{ocp_project_name}}-service-account.yaml"
-  register: out_m
-- name: show result after generating the service account
-  debug: var=out_m
+- import_tasks: ../../../tasks/oc-admin-login.yml
 
 - name: add the required security context constraints to the service account
   shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{ocp_project_name}}:{{ocp_project_name}}-sa"
@@ -82,7 +78,7 @@
   register: result_msg
   ignore_errors: true
 - debug: var=result_msg.stdout_lines
-- name: check failed verify configuration parameters
+- name: check missing verify configuration parameters
   debug: var=result_msg.stderr_lines
   failed_when: result_msg.rc != 0
   when: result_msg.rc != 0
@@ -93,7 +89,7 @@
   register: outmsg
   ignore_errors: true
 - debug: var=outmsg.stdout_lines
-- name: check failed verify ocp settings
+- name: check missing verify ocp settings
   debug: var=outmsg.stderr_lines
   failed_when: outmsg.rc != 0
   when: outmsg.rc != 0

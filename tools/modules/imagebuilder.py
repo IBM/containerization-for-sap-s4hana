@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,16 +31,14 @@ from modules.command    import (
     CmdShell,
     CmdSsh
 )
-from modules.fail       import fail
 from modules.exceptions import RpmFileNotFoundException
+from modules.fail       import fail
 from modules.remotecopy import RemoteCopy
 from modules.tools      import (
     genFileFromTemplate,
     getRpmFileForPackage,
     pushd
 )
-
-from modules.constants  import getConstants
 
 
 # Functions
@@ -122,7 +120,7 @@ class Builder():
             dirs.build  = self._cmdShell.run(f'mktemp -d -p "{buildTmpRoot}" '
                                              f'-t soos-build-{self._flavor}.XXXXXXXXXX').out
         dirs.usrSapReal = self._getUsrSapReal()
-        dirs.sapmnt     = self._getSapmntDir(sidU)
+        dirs.sapmnt     = self._ctx.cf.refsys.nws4.base.sapmnt
 
         self._setDirsFlavor(sidU, dirs)
 
@@ -175,23 +173,6 @@ class Builder():
         logging.debug(f"usrSapReal: '{usrSapReal}'")
         return usrSapReal
 
-    def _getSapmntDir(self, sidU):
-        # Get path of SAP Mount Directory (nws4) or path to 'shared' directory (hdb)
-        # XXX ASSUMES THAT ".../<SID>/SYS/profile" IS A SYMBOLIC LINK
-        #     WHOSE TARGET PATH STARTS WITH THE WANTED DIRECTORY
-        #     DOES THIS ALWAYS WORK?
-
-        profilePath   = self._cmdSsh.run(f'find /usr/sap/ -type l -ipath '
-                                         f'"*{sidU}/SYS/profile"').out
-        profileTarget = self._cmdSsh.run(f'readlink "{profilePath}"').out
-        sapmnt        = profileTarget[0:profileTarget.index(f'/{sidU}/profile')]
-
-        logging.debug(f"profilePath  : '{profilePath}'")
-        logging.debug(f"profileTarget: '{profileTarget}'")
-        logging.debug(f"sapmnt       : '{sapmnt}'")
-
-        return sapmnt
-
     def _setDirsFlavor(self, sidU, dirs):
         # Flavor specific directories
         # pylint: disable=unused-argument
@@ -199,9 +180,6 @@ class Builder():
 
     def _getOsUserProperties(self, sidL):
         # Get properties of sapadm and <sid>adm from remote host /etc/passwd
-        #
-        # XXX IN CASE THE SOURCE SYSTEM USES YP OR ANOTHER AUTHENTICATION
-        #     SETUP THIS NEEDS TO BE DONE DIFFERENTLY!!!
 
         sapadm = types.SimpleNamespace()
         (_d1,
@@ -239,8 +217,13 @@ class Builder():
         # pylint: disable=too-many-arguments
         filterFilePath = f'{dirs.tmp}/rsync-filter'
         logging.debug(f"filterFilePath: {filterFilePath}")
-        with open(filterFilePath, 'w') as fh:  # pylint: disable=invalid-name
-            print(self._getRsyncFilter(sidU, dirs, remoteOs), file=fh)
+        try:
+            # pylint: disable=invalid-name, unspecified-encoding
+            with open(filterFilePath, 'w') as fh:
+                print(self._getRsyncFilter(sidU, dirs, remoteOs), file=fh)
+        except IOError:
+            fail(f"Error writing to file {filterFilePath}")
+
         self._genBuildContextFlavor(sidU, dirs, sapadm, sidadm, sapsysGid, host, filterFilePath)
 
     def _getRsyncFilter(self, sidU, dirs, remoteOs):
@@ -300,8 +283,12 @@ class Builder():
         containerfile = f'{dirs.tmp}/containerfile'
         template      = f'{dirs.repoRoot}/openshift/images/{self._flavor}/containerfile.template'
         genFileFromTemplate(template, containerfile, params)
-        with open(containerfile) as fh:  # pylint: disable=invalid-name
-            logging.debug(f"Contents of '{containerfile}': >>>\n{fh.read()}<<<")
+        try:
+            # pylint: disable=invalid-name, unspecified-encoding
+            with open(containerfile) as fh:
+                logging.debug(f"Contents of '{containerfile}': >>>\n{fh.read()}<<<")
+        except IOError:
+            fail(f"Error reading from {containerfile}")
         return containerfile
 
     def _getContainerfileParams(self, sidU, dirs):
@@ -465,12 +452,13 @@ class BuilderNws4(Builder):
             # self._remoteCopy.copy(f'{sapadm.home}', filterFilePath)
             self._remoteCopy.copy(f'{sidadm.home}', filterFilePath)
 
-            with open(f'.{dirs.usrSapReal}/sapservices', 'w') as fh:  # pylint: disable=invalid-name
+            # pylint: disable=invalid-name, unspecified-encoding
+            with open(f'.{dirs.usrSapReal}/sapservices', 'w') as fh:
                 print(self._cmdSsh.run(f'grep {sidU} /usr/sap/sapservices').out, file=fh)
-            with open('./etc_services_sap', 'w') as fh:  # pylint: disable=invalid-name
+            with open('./etc_services_sap', 'w') as fh:
                 print(self._cmdSsh.run('grep "^sap" /etc/services').out, file=fh)
 
-            with open('./etc_security_limits.conf', 'w') as fh:  # pylint: disable=invalid-name
+            with open('./etc_security_limits.conf', 'w') as fh:
                 print(self._cmdSsh.run('grep "@sapsys"         /etc/security/limits.conf').out,
                       file=fh)
                 print(self._cmdSsh.run('grep "@dba"            /etc/security/limits.conf').out,
@@ -503,10 +491,10 @@ class BuilderHdb(Builder):
 
     def _setDirsFlavor(self, sidU, dirs):
         # Flavor specific directories of flavor 'hdb'
-        targetMountdir     = dirs.sapmnt[0:dirs.sapmnt.rindex('/')]  # cut off trailing '/shared'
+        targetMountdir     = self._ctx.cf.refsys.hdb.base.shared
         dirs.hanaSharedSid = f'{targetMountdir}/shared/{sidU}'
         logging.debug(f"dirs.hanaSharedSid: '{dirs.hanaSharedSid}'")
-        dirs.defaultPackagesDir = getConstants().defaultPackagesDir
+        dirs.defaultPackagesDir = self._ctx.cs.defaultPackagesDir
 
     def _getRsyncFilter(self, sidU, dirs, remoteOs):
         rsFilter = ''
@@ -540,12 +528,12 @@ class BuilderHdb(Builder):
             self._remoteCopy.copy('/etc/sysctl.conf', filterFilePath)
             self._remoteCopy.copy('/etc/pam.d/sapstartsrv', filterFilePath)
             self._remoteCopy.copy('/etc/security/limits.d/99-sapsys.conf', filterFilePath)
-
-            with open(f'.{dirs.usrSapReal}/sapservices', 'w') as fh:  # pylint: disable=invalid-name
+            # pylint: disable=invalid-name, unspecified-encoding
+            with open(f'.{dirs.usrSapReal}/sapservices', 'w') as fh:
                 print(self._cmdSsh.run(f'grep {sidU} /usr/sap/sapservices').out, file=fh)
             with open('./etc_services_sap', 'w') as fh:  # pylint: disable=invalid-name
                 print(self._cmdSsh.run('grep "^sap" /etc/services').out, file=fh)
-            with open('./etc_security_limits.conf', 'w') as fh:  # pylint: disable=invalid-name
+            with open('./etc_security_limits.conf', 'w') as fh:
                 print(self._cmdSsh.run('grep "@sapsys"         /etc/security/limits.conf').out,
                       file=fh)
                 print(self._cmdSsh.run('grep "@dba"            /etc/security/limits.conf').out,

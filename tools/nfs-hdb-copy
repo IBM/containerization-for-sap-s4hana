@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,33 +19,98 @@
 """ Copy an SAP HANA DB snapshot to the NFS server """
 
 
-# Global modules
+try:
+    # Global modules
 
-import logging
-import sys
+    import logging
+    from pathlib          import Path
 
+    # Local modules
 
-# Local modules
+    from modules.args     import getCommonArgs
+    from modules.command  import (
+        CmdSsh,
+        CmdShell
+    )
+    from modules.context  import getContext
+    from modules.fail     import fail
+    from modules.nfstools import (
+        getHdbCopyBase,
+        getHdbSubDirs
+    )
+    from modules.startup  import startup
+    from modules.tools    import getNumRunningSapProcs
 
-from modules.args     import getCommonArgs
-from modules.command  import CmdSsh
-from modules.context  import getContext
-from modules.fail     import fail
-from modules.nfstools import (
-    getHdbCopyBase,
-    getHdbSubDirs
-)
-from modules.tools    import (
-    getNumRunningSapProcs,
-    getHdbCopySshCommand
-)
-from modules.verify   import Verify
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
 
+def _getCopyCmd(cmdSshDb, cmdSshNfs, sourceDir, targetDir):
+    # Copy using tar shell command running on SAPDBHOST,
+    # redirecting the output to <stdout>
+    # and piping it then to the tar command running on the
+    # NFS server.
+
+    # ssh command Build Server -> SAPDBHOST
+    sshDb  = cmdSshDb.getSshCmdAndSecrets()[0]
+    # ssh command Build Server -> NFS Server
+    sshNfs = cmdSshNfs.getSshCmdAndSecrets()[0]
+
+    tarCmd = f"tar cf - {sourceDir}"
+
+    # --strip-components=<value> is an argument used during extracting the tar file
+    # Its value is set to the number of existing subdirs of the source to
+    # strip the number of leading components from the extracted file name
+    noOfSubdirs = _getNoOfSubdirs(sourceDir)
+
+    untarCmd = f"tar xf - -C {targetDir} --strip-components={noOfSubdirs} --same-owner"
+    return f"{sshDb} {tarCmd} | {sshNfs} {untarCmd}"
+
+
+def _getNoOfSubdirs(directory):
+    parentDir = Path(directory)
+    count = 0
+    rootDir = parentDir.anchor
+    while str(parentDir) != str(rootDir):
+        parentDir = parentDir.parent
+        count = count+1
+    return count
+
+
+def _getFileSizeSet(cmdSsh, directory):
+    cmd = f'cd {directory}; find . -type f -printf "%s %p$"'
+    result = cmdSsh.run(cmd)
+    if result.rc != 0:
+        fail("Error: could not get file list")
+
+    sizeList = result.out.split("$")
+    sizeSet = set()
+    for element in sizeList:
+        sizeSet.add(tuple(element.split(" ")))
+    return sizeSet
+
+
+def _checkCopyStep(cmdSshDb, cmdSshNfs, sourceDir, targetDir):
+    sourceSizes = _getFileSizeSet(cmdSshDb, sourceDir)
+    targetSizes = _getFileSizeSet(cmdSshNfs, targetDir)
+
+    # get differences:
+    diffs = sourceSizes - targetSizes
+
+    # if the set of diffs is not empty, there is a mismatch between source and target
+    if len(diffs) > 0:
+        for obj in diffs:
+            # obj looks like: [<size>, <filename>]
+            print(f"Missing file or file with wrong size: {obj[1]} on {targetDir}")
+        return False
+    return True
 
 # ----------------------------------------------------------------------
+
 
 def _main():
 
@@ -60,6 +125,7 @@ def _main():
     nfsHost   = ctx.cf.nfs.host
     nfsUser   = ctx.cr.nfs.user
     cmdSshNfs = CmdSsh(ctx, nfsHost.name, nfsUser)
+    cmdSshDb  = CmdSsh(ctx, hdbHost.name, hdbUser)
 
     logging.debug('Checking if HDB is stopped')
 
@@ -69,33 +135,27 @@ def _main():
         fail(f"Error: HANA Database '{hdbSid}' is running on host {hdbHost.name}.\n"
              f"Stop the database then restart the nfs-hdb-copy step.")
 
-    # Check if SSH connection from NFS server to HDB server is possible
-
-    if not Verify(ctx).verifyNfsToHdbSshConnection(doPrint=False):
-        fail(f"Cannot establish connection from "
-             f"'{nfsUser.name}@{nfsHost.name}' to ''{hdbUser.name}@{hdbHost.name}''")
-
     # Copy HDB content
 
-    for subDir in getHdbSubDirs():
+    for obj in getHdbSubDirs(ctx):
 
-        sourceDir = f"{hdbUser.name}@{hdbHost.ip}:{ctx.cf.refsys.hdb.base}/{subDir}/{hdbSid}/*"
+        subDir = obj.path
+        base   = obj.base
+        sourceDir = f"{base}/{subDir}/{hdbSid}"
         targetDir = f"{getHdbCopyBase(ctx)}/{subDir}/{hdbSid}"
 
         cmdSshNfs.run(f'mkdir -p "{targetDir}"')
 
-        rsyncSsh, rsyncSshSecrets = getHdbCopySshCommand(ctx, withLogin=False)
+        copyCmd = _getCopyCmd(cmdSshDb, cmdSshNfs, sourceDir, targetDir)
 
         print(f"Copying '{sourceDir}' to '{targetDir}' on host '{ctx.cf.nfs.host.name}'")
+        CmdShell().run(copyCmd)
 
-        cmdSshNfs.run(f'rsync -avr -e "{rsyncSsh}" "{sourceDir}" "{targetDir}"', rsyncSshSecrets)
+        if not _checkCopyStep(cmdSshDb, cmdSshNfs, sourceDir, targetDir):
+            print(f"Copying '{sourceDir}' to '{targetDir}' was not successful.")
 
 
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

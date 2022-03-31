@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,28 +19,33 @@
 """ Add/remove SSH public keys to/from the various authorized_keys files """
 
 
-# Global modules
+try:
+    # Global modules
 
-import logging
-import sys
+    import logging
 
+    # Local modules
 
-# Local modules
+    from modules.args     import getCommonArgsParser
+    from modules.context  import getContext
+    from modules.fail     import fail
+    from modules.nestedns import objToNestedNs
+    from modules.ssh      import (
+        AuthorizedKeys,
+        getPublicKey
+    )
+    from modules.startup  import startup
+    from modules.tools    import (
+        getBuildHost,
+        getBuildUser,
+        helperIsBuild,
+        helperIsNfs
+    )
 
-from modules.args     import getCommonArgsParser
-from modules.context  import getContext
-from modules.fail     import fail
-from modules.nestedns import objToNestedNs
-from modules.ssh      import (
-    AuthorizedKeys,
-    getPublicKey
-)
-from modules.tools    import (
-    getBuildHost,
-    getBuildUser,
-    helperIsBuild,
-    helperIsNfs
-)
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -106,8 +111,7 @@ def _displayDetails(targets):
         f"    When: always\n"
         f"\n"
         f"    File: <refsys.hdb.sidadm>@<refsys.hdb.host>:{authKeysPath}\n"
-        f"    Keys: <build.user.sshid>.pub,\n"
-        f"          <nfs.user>@<nfs.host>:<nfs.user.name.sshid>.pub\n"
+        f"    Keys: <build.user.sshid>.pub\n"
         f"    When: always\n"
         f"\n"
         f"    File: <ocp.helper.user>@<ocp.helper.host>:{authKeysPath}\n"
@@ -129,10 +133,12 @@ def _displayDetails(targets):
         f"  - If the respective '.sshid' property is not set in the credentials file\n"
         f"    the public key 'id_rsa.pub' will be added/removed as default\n"
         f"\n"
-        f"  - If a key is already present in the target authorized_keys file it\n"
+        f"  - Option --add-keys:\n"
+        f"    If a key is already present in the target authorized_keys file it\n"
         f"    will not be added another time to avoid duplicate entries\n"
         f"\n"
-        f"  - If a key is present multiple times in the target authorized_keys\n"
+        f"  - Option --remove-keys:\n"
+        f"    If a key is present multiple times in the target authorized_keys\n"
         f"    file all occurrences of the key will be removed\n"
         f"\n",
         sepLine,
@@ -220,7 +226,7 @@ def _main():
     # Get public keys that need to be added/removed to/from the various authorized_keys files
 
     pubKeyLocal = getPublicKey(ctx, getBuildHost().name, getBuildUser(ctx))
-    pubKeyNfs   = getPublicKey(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
+    # pubKeyNfs   = getPublicKey(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user)
 
     # Add/remove the public keys to/from the various authorized_keys files
 
@@ -239,7 +245,7 @@ def _main():
     targets.append({
         'hname':  ctx.cf.refsys.hdb.host.name,
         'user':   ctx.cr.refsys.hdb.sidadm,
-        'keys':   [pubKeyLocal, pubKeyNfs]
+        'keys':   [pubKeyLocal]
     })
 
     # HELPER user
@@ -290,8 +296,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

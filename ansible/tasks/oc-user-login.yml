@@ -1,6 +1,6 @@
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,6 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: Login as user "{{ ocp_user_name }}" to OCP cluster
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-login -c ./config.yaml -q ./creds.yaml -u -w"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-login -c ./config.yaml -q ./creds.yaml -u --project-ignore -w"
   register: login_ocp_msg
 - debug: var=login_ocp_msg.stdout

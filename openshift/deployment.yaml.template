@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ metadata:
   namespace: {{PROJECT}}
   labels:
     app: {{DEPLOYMENT_NAME}}
+    overlayUuid: {{OVERLAY_UUID}}
 spec:
   replicas: 1
   selector:
@@ -102,6 +103,10 @@ spec:
             value: "{{HDB_INSTNO}}"
           - name: SOOS_HDB_BASE_DIR
             value: {{HDB_BASE}}
+          - name: SOOS_HDB_BASE_DATA_DIR
+            value: {{HDB_BASE_DATA}}
+          - name: SOOS_HDB_BASE_LOG_DIR
+            value: {{HDB_BASE_LOG}}
           volumeMounts:
           - name: envdir-ascs
             mountPath: "/envdir-ascs"
@@ -124,9 +129,9 @@ spec:
             - name: envdir-hdb
               mountPath: /etc/sysconfig/soos
             - name: nfs-data
-              mountPath: {{HDB_BASE}}/data/{{HDB_SAPSID}}
+              mountPath: {{HDB_BASE_DATA}}/data/{{HDB_SAPSID}}
             - name: nfs-log
-              mountPath: {{HDB_BASE}}/log/{{HDB_SAPSID}}
+              mountPath: {{HDB_BASE_LOG}}/log/{{HDB_SAPSID}}
             - name: nfs-persistence
               mountPath: /persistence
         # NWS4 ASCS SAP System Container

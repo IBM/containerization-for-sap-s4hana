@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2021 IBM Corp. All Rights Reserved.
+  Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ Hat® OpenShift® Container Platform using the command line tools.
   <summary>Table of Contents</summary>
 
 - [Build LPARs](#build-lpars)
+- [Important Remark](#important-remark)
 - [General Command Line Parameters](#general-command-line-parameters)
 - [Building and Deploying Automatically](#building-and-deploying-automatically)
 - [Building Manually](#building-manually)
@@ -51,10 +52,15 @@ Hat® OpenShift® Container Platform using the command line tools.
 We performed our tests both on the cluster helper node and on a
 separate build LPAR. If you run the build on the cluster helper node,
 you do not need to setup the connection to the cluster (i.e. you do
-not have to perform the steps described in [Name Resolution for
-OpenShift Container Platform
-Services](PREREQUISITES.md#name-resolution-for-red-hat-openshift-container-platform-services)).
-          
+not have to perform the steps described in section [*Name Resolution
+for OpenShift Container Platform
+Services*](PREREQUISITES.md#name-resolution-for-red-hat-openshift-container-platform-services)).
+
+## Important Remark
+
+This documentation describes how to create one copy of your reference SAP system. For adding and
+handling additional copies see documentation 
+[*Verifying and Managing the Deployments*](VERIFYING-MANAGING.md).          
 
 ## General Command Line Parameters
 
@@ -122,11 +128,18 @@ tools in the `tools/` directory of your repository clone:
 
   from the root directory of your repository clone.
 
-  The above command performs all necessary steps to get a running copy
+  The above command performs all necessary steps to get one running copy
   of your reference SAP system in your cluster. The whole process
   takes some time (about 30 minutes in our build setup).
-
-
+  If you want to add more copies of your reference SAP System 
+  to your cluster see documentation 
+  [*Verifying and Managing the Deployments*](VERIFYING-MANAGING.md).
+  
+> **Note:** The command `containerize` calls multiple other commands. These
+> commands generate their own log files.
+> In case of problems, please check all log files generated after
+> start time of the `containerize` execution.
+  
 ## Building Manually
 
 Manual build involves creating a snapshot copy of the `data/` and `log/`
@@ -333,16 +346,17 @@ three steps:
   $ tools/nfs-overlay-setup
   ```
 
-  The commands emit the unique ID
+  The commands emit the unique Overlay ID
 
   ```shell
-  <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
+  <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>
   ```
 
   of the freshly created overlay share. This unique ID is used when
   generating a deployment description file (see section [*Generating a
   Deployment Description
   File*](#generating-a-deployment-description-file)).
+
 
 - You can list all existing NFS overlay shares including their date
   and time of creation by running
@@ -361,20 +375,20 @@ three steps:
 
   ```shell
   ⋮
-  <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid> (<date-of-creation> <time-of-creation>)
+  <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid> <date-of-creation> <time-of-creation>
   ⋮
   ```
 
 - You can tear down an existing NFS overlay share by running
 
   ```shell
-  $ tools/containerize -t -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
+  $ tools/containerize -t -u <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>
   ```
 
   or
 
   ```shell
-  $ tools/nfs-overlay-teardown -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
+  $ tools/nfs-overlay-teardown -u <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>
   ```
 
   Instead of specifying the complete unique ID it is sufficient to
@@ -386,17 +400,17 @@ three steps:
 - Generate a deployment description file by running
 
   ```shell
-  $ tools/containerize -d -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
+  $ tools/containerize -d -u <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>
   ```
 
   or
 
   ```shell
-  $ tools/ocp-deployment-gen -u <uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>
+  $ tools/ocp-deployment --gen-yaml -u <ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>
   ```
 
   where
-  `<uuid>-<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>` is
+  `<ocp-user-name>-<ocp-project-name>-<hdb-host>-<hdb-sid>-<uuid>` is
   the unique ID of the overlay share which was created in the previous
   step. Instead of specifying the complete unique ID it is sufficient
   to specify a prefix of the unique ID which is unique to the unique
@@ -406,10 +420,14 @@ three steps:
   description file
 
   ```shell
-  <ocp-project-name>-deployment-<nws4-sid>-<hdb-sid>.yaml
+  soos-<nws4-sid>-<uuid>-deployment.yaml
   ```
 
   in the root directory of your repository clone.
+  `<uuid>` is the unique ID which is used to identify the different deployments.
+  For more information about how to manage more than one copy of your reference
+  SAP system see documentation
+  [*Verifying and Managing the Deployments*](VERIFYING-MANAGING.md).
 
 ### Starting the SAP system on Red Hat OpenShift Container Platform
 
@@ -417,10 +435,10 @@ three steps:
 - Start the SAP system on the cluster by running
 
   ```shell
-  $ tools/containerize -s
+  $ tools/containerize -s -f soos-<nws4-sid>-<uuid>-deployment.yaml
   ```
 
 ## Further steps
 
 For further steps see documentation [*Verifying and Managing the
-Deployment*](VERIFYING-MANAGING.md).
+Deployments*](VERIFYING-MANAGING.md).

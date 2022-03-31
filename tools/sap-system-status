@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,29 +19,36 @@
 """ Get SAP system status """
 
 
-# Global modules
+try:
+    # Global modules
 
-import collections
-import logging
-import re
-import sys
-import types
-import time
+    import collections
+    import logging
+    import re
+    import time
+    import types
 
+    # Local modules
 
-# Local modules
+    from modules.args       import (
+        addCommonArgsString,
+        getCommonArgsParser,
+        addArgAppName,
+        addArgLoop,
+        addArgSleepTime
+    )
+    from modules.context    import getContext
+    from modules.nestedns   import objToNestedNs
+    from modules.ocp        import Ocp
+    from modules.startup    import startup
+    from modules.tools      import getTimestamp
+    from modules.deployment import Deployments
+    from modules.fail       import fail
 
-from modules.args    import (
-    addCommonArgsString,
-    getCommonArgsParser
-)
-from modules.context  import getContext
-from modules.nestedns import objToNestedNs
-from modules.ocp      import (
-    containerRun,
-    getContainerName
-)
-from modules.tools    import getTimestamp
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -52,49 +59,38 @@ def _getArgs():
         'Get SAP system status'
     )
 
-    parser.add_argument(
-        '-l',
-        '--loop',
-        required = False,
-        action   = 'store_true',
-        help     = "Print information in endless loop"
-    )
+    addArgAppName(parser)
+    addArgLoop(parser)
+    addArgSleepTime(parser)
 
-    parser.add_argument(
-        '-t',
-        '--sleep-time',
-        metavar  = '<sleep-time>',
-        required = False,
-        type     = int,
-        default  = 5,
-        help     = "Sleep time in seconds between two loop executions"
-    )
+    helpText  = "Print the process list for every container."
+    helpText += "Ignored if --app-name not specified."
 
     parser.add_argument(
         '--process-list',
         required = False,
         action   = 'store_true',
-        help     = "Print the process list for every container"
+        help     = helpText
     )
 
     return parser.parse_args()
 
 
-def _getStatus(ctx, instance, sidadm, instno):
+def _getStatus(ocp, instance, sidadm, instno):
     # pylint: disable=too-many-locals
 
     class _LocalEx(Exception):
         pass
 
     try:
-        containerName = getContainerName(ctx, instance)
+        containerName = ocp.getContainerName(instance)
 
         sapctrlCmd = f'sapcontrol -nr {instno} -function GetProcessList -format script'
         statusCmd  = f"su - {sidadm} -c '{sapctrlCmd}'"
 
         rcOk = (0, 3)  # Even if sapcontrol exits with rc==3 the result seems to be ok
 
-        res = containerRun(ctx, containerName, statusCmd, rcOk=rcOk)
+        res = ocp.containerRun(containerName, statusCmd, rcOk=rcOk)
 
         if res.rc not in rcOk:
             raise _LocalEx(f"Execution of command '{statusCmd}"
@@ -150,12 +146,13 @@ def _getStatus(ctx, instance, sidadm, instno):
 
     logging.debug(f'status >>>{status}<<<')
 
-    return status
+    result = types.SimpleNamespace()
+    result.status = status
+    result.rc     = res.rc
+    return result
 
 
-def _printStatus(ctx, instance, sidadm, instno):
-    status = _getStatus(ctx, instance, sidadm, instno)
-
+def _printStatus(ctx, status, instance):
     if ctx.ar.process_list:
         print('='*40 + f' {instance.upper():4} ' + '='*40)
         _printProcesslist(status)
@@ -218,7 +215,7 @@ def _printContainerStatus(instance, status):
     instance = instance.upper()
 
     if not status:
-        print(_getContainerStatusLine(instance, 'could not get status'))
+        print(_getContainerStatusLine(instance, 'unknown'))
 
     elif all(proc.textstatus == "Running" for proc in status):
         print(_getContainerStatusLine(instance, 'running'))
@@ -228,10 +225,46 @@ def _printContainerStatus(instance, status):
 
 
 def _getContainerStatusLine(instance, status):
-    return f'{instance:{len("Instance")}}  {status}'
+    return f'{instance:{len("Instance:")}}  {status}'
 
+
+def _printHeader():
+    print(_getContainerStatusLine('Instance',  'Status'))
+    print('='*len(_getContainerStatusLine('', 'not all processes running')))
+
+
+def _printAppName(appName, first, processList):
+    if not processList and not first:
+        print('-'*len(_getContainerStatusLine('', 'not all processes running')))
+    print(f'App-Name:  {appName}')
+    if not processList:
+        print('-'*len(_getContainerStatusLine('', 'not all processes running')))
+
+
+def _getReturnCode(retCodeList):
+    # Return code retCode set as follows:
+    # retCode =  0: all sapcontrol calls return ok (rc=0 or rc=3)
+    # retCode =  1: at least one (not all) sapcontrol call returns 1
+    # retCode =  2: at least one (not all) sapcontrol call returns 2
+    # retCode =  4: at least one (not all) sapcontrol call returns 4
+    # retCode =  8: all sapcontrol calls return 2
+    # retCode = 16: all sapcontrol calls return 4
+
+    noOfContainers = len(retCodeList)
+
+    if retCodeList.count(0) + retCodeList.count(3) == noOfContainers:
+        # all instances are running
+        return 0
+    if retCodeList.count(4) == noOfContainers:
+        # all instances are stopped
+        return 16
+    if retCodeList.count(2) == noOfContainers:
+        # all instances are in wait state
+        return 8
+    return max(retCodeList)
 
 # ----------------------------------------------------------------------
+
 
 def _main():
 
@@ -242,36 +275,62 @@ def _main():
     instances = ctx.config.getContainerFlavors()
     instances.remove('init')
 
+    ocp = Ocp(ctx)
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployRunning)
+
+    appNames = None
+    if not ctx.ar.app_name:
+        appNames = deployments.getAppNames()
+        ctx.ar.process_list = None
+    else:
+        appName = deployments.getValidAppName()
+        appNames = [appName]
+
+    if len(appNames) == 0:
+        fail("No running deployments found.")
+
     while True:
-        print(getTimestamp(withDecorator=True))
+        retCodeList = []
+
+        if ctx.ar.loop:
+            print(getTimestamp(withDecorator=True))
 
         if not ctx.ar.process_list:
-            print(_getContainerStatusLine('Instance',  'Status'))
-            print('-'*len(_getContainerStatusLine('', 'not all processes running')))
+            _printHeader()
 
-        for instance in instances:
+        first = True
 
-            if instance in ('ascs', 'di'):
-                sidadm = ctx.cr.refsys.nws4.sidadm.name
-                instno = getattr(ctx.cf.refsys.nws4, instance).instno
+        for appName in appNames:
+            _printAppName(appName, first, ctx.ar.process_list)
+            first = False
 
-            elif instance == 'hdb':
-                sidadm = ctx.cr.refsys.hdb.sidadm.name
-                instno = ctx.cf.refsys.hdb.instno
+            for instance in instances:
 
-            _printStatus(ctx, instance, sidadm, instno)
+                if instance in ('ascs', 'di'):
+                    sidadm = ctx.cr.refsys.nws4.sidadm.name
+                    instno = getattr(ctx.cf.refsys.nws4, instance).instno
+
+                elif instance == 'hdb':
+                    sidadm = ctx.cr.refsys.hdb.sidadm.name
+                    instno = ctx.cf.refsys.hdb.instno
+
+                ocp.setAppName(appName)
+
+                result = _getStatus(ocp, instance, sidadm, instno)
+                _printStatus(ctx, result.status, instance)
+                retCodeList.append(result.rc)
 
         if ctx.ar.loop:
             time.sleep(ctx.ar.sleep_time)
         else:
             break
 
+    del ocp
+
+    return _getReturnCode(retCodeList)
+
 
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

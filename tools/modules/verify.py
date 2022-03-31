@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,19 +24,15 @@
 
 # Local modules
 
-from modules.command    import (
-    CmdShell,
-    CmdSsh
-)
-from modules.constants  import getConstants
+from modules.command    import CmdSsh
 from modules.exceptions import RpmFileNotFoundException
-from modules.ocp        import ocLogin
+from modules.ocp        import Ocp
+from modules.fail       import fail
 from modules.tools      import (
-    refSystemIsStandard,
     areContainerMemResourcesValid,
     getRpmFileForPackage,
-    strBold,
-    getHdbCopySshCommand
+    refSystemIsStandard,
+    strBold
 )
 
 
@@ -63,22 +59,34 @@ class Verify():
     """ Verify various configuration settings """
 
     def __init__(self, ctx):
+        self._functions = {
+            "verify_ocp": self._verifyOcp,
+            "verify_nfs": self._verifyNfs,
+            "verify_nws4": self._verifyNws4,
+            "verify_hdb": self._verifyHdb,
+        }
 
         self._ctx = ctx
 
         self._cmdSshNfs  = CmdSsh(ctx, ctx.cf.nfs.host.name, ctx.cr.nfs.user,
-                                  reuseCon=False)
+                                  check=False, reuseCon=False)
         self._cmdSshNws4 = CmdSsh(ctx, ctx.cf.refsys.nws4.host.name, ctx.cr.refsys.nws4.sidadm,
-                                  reuseCon=False)
+                                  check=False, reuseCon=False)
         self._cmdSshHdb  = CmdSsh(ctx, ctx.cf.refsys.hdb.host.name, ctx.cr.refsys.hdb.sidadm,
-                                  reuseCon=False)
+                                  check=False, reuseCon=False)
+        self._ocp        = Ocp(self._ctx, login="user", verify=True)
 
-    # Public methods
+# Public methods
 
     def verify(self):
         """ Verify various configuration settings """
 
-        success = True
+        success, msg = self._checkSsh()
+        if not success:
+            fail(msg)
+        showMsgOk("SSH key setup is valid.")
+        if self._ctx.ar.function in self._functions:
+            return self._functions[self._ctx.ar.function]()
 
         success = self._verifyOcp()                  and success
         success = self._verifyImages()               and success
@@ -86,82 +94,63 @@ class Verify():
         success = self._verifyHdb()                  and success
         success = self._verifyNfs()                  and success
         success = self._verifySapSystem()            and success
-        success = self.verifyNfsToHdbSshConnection() and success
-
-        return success
-
-    def verifyNfsToHdbSshConnection(self, doPrint=True):
-        """ Verify SSH connection from NFS host to HDB host """
-        hdbUser = self._ctx.cr.refsys.hdb.sidadm
-        hdbHost = self._ctx.cf.refsys.hdb.host
-
-        testSsh, testSshSecrets = getHdbCopySshCommand(self._ctx, withLogin=True, reuseCon=False)
-
-        # set dummy command
-        testSsh = testSsh + " true"
-
-        result = self._cmdSshNfs.run(testSsh, testSshSecrets)
-
-        success = result.rc == 0
-
-        if doPrint:
-
-            nfsUser = self._ctx.cr.nfs.user
-            nfsHost = self._ctx.cf.nfs.host.name
-
-            if success:
-                showMsgOk(f"SSH connection to HDB host '{hdbHost.name}' "
-                          f"from NFS host '{nfsHost}' was successful.")
-            else:
-                showMsgErr(f"Cannot establish ssh connection '{nfsUser.name}@{nfsHost}"
-                           f" → '{hdbUser.name}@{hdbHost.ip}' ('{hdbUser.name}@{hdbHost.name}').")
-                showMsgInd(f"Error message: '{result.out}'")
-                showMsgInd("Check the ssh connection"
-                           f" '{nfsUser.name}@{nfsHost}' → '{hdbUser.name}@{hdbHost.ip}'.")
 
         return success
 
     # Private methods
+    def _checkSsh(self):
+        success = True
+        msg = ''
+        res = self._cmdSshNfs.run('true')
+        if res.rc != 0:
+            msg += self._cmdSshNfs.formatSshError(res,
+                                                  self._ctx.cf.nfs.host.name,
+                                                  self._ctx.cr.nfs.user)
+            success = False
+
+        res = self._cmdSshNws4.run('true')
+        if res.rc != 0:
+            msg += self._cmdSshNws4.formatSshError(res,
+                                                   self._ctx.cf.refsys.nws4.host.name,
+                                                   self._ctx.cr.refsys.nws4.sidadm)
+            success = False
+
+        res = self._cmdSshHdb.run('true')
+        if res.rc != 0:
+            msg += self._cmdSshHdb.formatSshError(res,
+                                                  self._ctx.cf.refsys.hdb.host.name,
+                                                  self._ctx.cr.refsys.hdb.sidadm)
+            success = False
+
+        return success, msg
 
     def _verifyOcp(self):
         """ Verify OCP settings """
         # pylint: disable=too-many-statements
 
-        def isDomainNameValid(loginAnsw):
-            return 'no such host' not in loginAnsw
-
-        def isCredentialsValid(loginAnsw):
-            condFail1 = (loginAnsw.startswith('Login failed')
-                         and 'Verify you have provided correct credentials' in loginAnsw)
-            condFail2 = not (loginAnsw.startswith('Logged into')
-                             or loginAnsw.startswith('Login successful'))
-            return not (condFail1 or condFail2)
-
-        def isProjectValid(project):
-            # Assumes that an 'oc login' has been performed beforehand
-            cmd = f'oc get project {project} -o custom-columns=NAME:.metadata.name --no-headers'
-            # The command behaves as follows:
-            # - If the project exists in the OpenShift cluster its name is printed to stdout.
-            # - If it does not exist nothing is printed to stdout and an error message is printed
-            #   to stderr
-            return project in CmdShell().run(cmd).out
-
         def areResourcesValid(ocp, containerType):
             return areContainerMemResourcesValid(ocp, containerType)
 
-        def isSecretExisting(secret):
-            # Assumes that an 'oc login' has been performed beforehand
-            cmd = f'oc describe secret {secret}'
-            out = CmdShell().run(cmd).err
-            return not out.startswith('Error from server')
+        def isSecretExisting(ctx):
+            return ctx.cf.ocp.containers.di.secret in self._ocp.getSecret()
 
-        def verifySetup(ocp, loginAnsw):
+        def isHdbSecretValid(ctx):
+            userInSecret = self._ocp.getHdbConnectSecretUser()
+            userInCreds  = ctx.cr.refsys.nws4.hdbconnect
+            if (
+               not userInSecret.name     == userInCreds.name or
+               not userInSecret.password == userInCreds.password
+               ):
+                return False
+            return True
+
+        def verifySetup():
             success = True
-            if isDomainNameValid(loginAnsw):
+            if self._ocp.isDomainValid():
                 showMsgOk("OCP domain name is valid.")
-                if isCredentialsValid(loginAnsw):
+                if self._ocp.isCredentialsValid():
                     showMsgOk("OCP user and password are valid.")
-                    if isProjectValid(ocp.project):
+                    if self._ocp.isProjectValid():
                         showMsgOk("OCP project is valid.")
                     else:
                         showMsgErr(f"OCP project '{ocp.project}' does not exist.")
@@ -194,8 +183,15 @@ class Verify():
             if not refSystemIsStandard(self._ctx):
                 secret = ocp.containers.di.secret
                 if secret:
-                    if isSecretExisting(secret):
-                        showMsgOk(f"OCP secret '{secret}' exists.")
+                    if isSecretExisting(self._ctx):
+                        if isHdbSecretValid(self._ctx):
+                            showMsgOk(f"OCP secret '{secret}' exists and is valid.")
+                        else:
+                            showMsgErr(f"Mismatch between generated secret '{secret}' "
+                                       "and values specified in your credentials file.")
+                            showMsgInd("Re-generate your secret by executing the tool "
+                                       "'tools/ocp-hdb-secret-gen'")
+                            success = False
                     else:
                         showMsgErr(f"Specified OCP secret '{secret}' "
                                    "was not found in OCP cluster.")
@@ -214,7 +210,7 @@ class Verify():
         ocp     = self._ctx.cf.ocp
         user    = self._ctx.cr.ocp.user
 
-        success = verifySetup(ocp, ocLogin(self._ctx, user))
+        success = verifySetup()
         success = success and verifyResources(ocp)
         success = success and verifySecret(ocp)
 
@@ -236,7 +232,7 @@ class Verify():
 
         success = True
 
-        defaultPackagesDir = getConstants().defaultPackagesDir
+        defaultPackagesDir = self._ctx.cs.defaultPackagesDir
 
         for flavor in _getImageTypes(self._ctx):
             if flavor == "init":
@@ -285,11 +281,13 @@ class Verify():
         """ Verify settings for reference system component 'hdb' """
         success = self._verifyRefSys('hdb', self._cmdSshNws4)
         if success:
-            if self._isHdbBaseDirValid():
-                showMsgOk("HDB base directory is valid.")
-            else:
-                showMsgErr(f"HDB base directory '{self._ctx.cf.refsys.hdb.base}' is invalid.")
-                success = False
+            for baseDir in ['shared', 'data', 'log']:
+                basePath = getattr(self._ctx.cf.refsys.hdb.base, baseDir)
+                if self._isHdbBaseDirValid(baseDir):
+                    showMsgOk(f"HDB base directory '{basePath}' is valid for {baseDir}.")
+                else:
+                    showMsgErr(f"HDB base directory '{basePath}' is invalid.")
+                    success = False
 
         return success
 
@@ -357,9 +355,10 @@ class Verify():
         out = cmdSsh.run(f' ls {directory}').err
         return 'No such file or directory' not in out
 
-    def _isHdbBaseDirValid(self):
-        out = self._cmdSshHdb.run(f' ls {self._ctx.cf.refsys.hdb.base}').out
-        return 'data' in out and 'log' in out and 'shared' in out
+    def _isHdbBaseDirValid(self, base):
+        basePath = getattr(self._ctx.cf.refsys.hdb.base, base)
+        out = self._cmdSshHdb.run(f' ls {basePath}').out
+        return base in out
 
     def _isHdbSidInDefaultPfl(self):
         defaultPfl = f'/usr/sap/{self._ctx.cf.refsys.nws4.sidU}/SYS/profile/DEFAULT.PFL'
@@ -371,21 +370,25 @@ class VerifyOcp():
     """ Verify various ocp settings """
 
     def __init__(self, ctx):
-
+        self._functions = {
+            "verify_scc_for_project": self._verifySccForProject,
+            "verify_ocp_service_account": self._verifyOcpServiceAccount,
+            "verify_se_linux": self._verifySeLinux,
+            "verify_pid_limit": self._verifyPidLimit
+        }
         self._ctx = ctx
-        ocLogin(ctx, ctx.cr.ocp.admin)
-        self._workerNodes = CmdShell().run(
-            'oc get nodes'
-            + ' --selector="node-role.kubernetes.io/worker"'
-            + " -o template --template"
-            + " '{{range .items}}{{.metadata.name}}{{"+r'"\n"'+"}}{{end}}'"
-        ).out.split()
+        self._ocp = Ocp(self._ctx, login="admin", verify=True)
+        self._workerNodes = self._ocp.getWorkerNodeList()
+
+    def __del__(self):
+        del self._ocp
 
     # Public methods
 
     def verify(self):
         """ Verify various ocp settings """
-
+        if self._ctx.ar.function in self._functions:
+            return self._functions[self._ctx.ar.function]()
         success = True
         success = self._verifySccForProject()        and success
         success = self._verifyOcpServiceAccount()    and success
@@ -423,41 +426,35 @@ class VerifyOcp():
         return rval
 
     def _verifySccForProject(self):
-        ocp = self._ctx.cf.ocp
+        serviceAccountList = self._ocp.getServiceAccountListForScc("anyuid")
+        project = self._ctx.cf.ocp.project
+        serviceAccount = f'system:serviceaccounts:{project}'
 
-        out = CmdShell().run(
-            'oc adm policy who-can use scc anyuid'
-            " -o template --template='{{range .groups}}{{.}}{{"+r'"\n"'+"}}{{end}}'"
-        ).out.split()
-
-        if f'system:serviceaccounts:{ocp.project}' in out:
+        if serviceAccount in serviceAccountList:
             showMsgOk("Security Context Constraint 'anyuid' is valid.")
             return True
 
-        showMsgErr(f"Project '{ocp.project}' does not have "
+        showMsgErr(f"Project '{project}' does not have "
                    "the 'anyuid' Security Context Constraint permission.")
         showMsgInd("Logon as kube:admin and execute:")
         showMsgInd("      oc adm policy add-scc-to-group anyuid"
-                   f' "system:serviceaccounts:{ocp.project}"\n')
+                   f' "system:serviceaccounts:{project}"\n')
         return False
 
     def _verifyOcpServiceAccount(self):
-        ocp = self._ctx.cf.ocp
-
-        out = CmdShell().run(
-            'oc adm policy who-can use scc hostmount-anyuid'
-            " -o template --template='{{range .users}}{{.}}{{"+r'"\n"'+"}}{{end}}'"
-        ).out.split()
-
-        if f'system:serviceaccount:{ocp.project}:{ocp.project}-sa' in out:
+        serviceAccountList = self._ocp.getServiceAccountListForScc("hostmount-anyuid")
+        project = self._ctx.cf.ocp.project
+        saName  = self._ctx.cf.ocp.sa.name
+        serviceAccount = f'system:serviceaccount:{project}:{saName}'
+        if serviceAccount in serviceAccountList:
             showMsgOk("Security Context Constraint 'hostmount-anyuid' is valid.")
             return True
 
-        showMsgErr(f"Service account {ocp.project}-sa does not have "
+        showMsgErr(f"Service account {saName} does not have "
                    "the 'hostmount-anyuid' Security Context Constraint.")
         showMsgInd("Logon as kube:admin, create the service account and execute:")
         showMsgInd("         oc adm policy add-scc-to-user hostmount-anyuid"
-                   f' "system:serviceaccount:{ocp.project}:{ocp.project}-sa"\n')
+                   f' "system:serviceaccount:{project}:{saName}"\n')
         return False
 
     def _verifySeLinux(self):

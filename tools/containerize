@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,22 +19,40 @@
 """ Automated build, push and deploy """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    # None
 
+    # Local modules
 
-# Local modules
+    from modules.args     import (
+        addCommonArgsString,
+        getCommonArgsParser,
+        addArgOverlayUuid,
+        addArgDeploymentFile
+    )
 
-from modules.args     import (
-    addCommonArgsString,
-    getCommonArgsParser
-)
-from modules.command  import CmdShell
-from modules.context  import getContext
-from modules.fail     import fail
-from modules.nfstools import Overlays
-from modules.ocp      import ocLogin
+    from modules.containerize import (
+        copyHdb,
+        buildImages,
+        pushImages,
+        setupOverlayShare,
+        createDeploymentFile,
+        startDeployment,
+        listOverlayShares,
+        tearDownOverlayShare,
+        stopDeployment
+    )
+
+    from modules.context  import getContext
+    from modules.startup  import startup
+    from modules.times    import saveCurrentTime
+
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -77,12 +95,10 @@ def _getArgs():
         help     = "Setup overlay share"
     )
 
-    parser.add_argument(
-        '-u',
-        '--overlay-uuid',
-        metavar  = '<overlay-uuid>',
-        required = False,
-        help     = "UUID of overlay share for options '-d' and '-t'"
+    addArgOverlayUuid(
+        parser,
+        required=False,
+        helpText="UUID of overlay share for options '-d' and '-t'"
     )
 
     parser.add_argument(
@@ -109,12 +125,18 @@ def _getArgs():
         help     = "Create deployment file"
     )
 
+    addArgDeploymentFile(
+        parser,
+        required=False,
+        helpText="Deployment filename for options '-s' and '-x'"
+    )
+
     parser.add_argument(
         '-s',
         '--start-deployment',
         required = False,
         action   = 'store_true',
-        help     = "Start deployment on OCP cluster"
+        help     = "Start deployment specified with option -f on OCP cluster"
     )
 
     parser.add_argument(
@@ -122,7 +144,7 @@ def _getArgs():
         '--stop-deployment',
         required = False,
         action   = 'store_true',
-        help     = "Stop deployment on OCP cluster"
+        help     = "Stop deployment specified with option -f on OCP cluster"
     )
 
     parser.add_argument(
@@ -145,140 +167,17 @@ def _getArgs():
     return parser.parse_args()
 
 
-def _genHeader(header, lineChar):
-    """ Generate header string (generic) """
-    return lineChar*60+'\n'+header+'\n'+lineChar*60
-
-
-def _genHeader1(header):
-    """ Generate header string (level 1 header) """
-    return _genHeader(header, '=')
-
-
-def _genHeader2(header):
-    """ Generate header string (level 2 header) """
-    return _genHeader(header, '-')
-
-
-def getOverlayUuid(ctx, overlayUuid):
-    """ Get overlay UUID from parameter or cli argument.
-        Exit, if no overlay UUID can be determined """
-    if not overlayUuid:
-        if ctx.ar.overlay_uuid:
-            overlayUuid = ctx.ar.overlay_uuid
-        else:
-            fail("Please specify an overlay share UUID via option '-u'")
-
-    return Overlays(ctx).find(overlayUuid).uuid
-
-
-def _runCmd(cmd):
-    result = CmdShell().run(cmd)
-    if result.rc != 0:
-        msg = ''
-        msg += f"Command '{cmd}' failed"
-        msg += f'\n  stdout: >>>{result.out}<<<'
-        msg += f'\n  stderr: >>>{result.err}<<<'
-        msg += f'\n  rc: {result.rc}'
-        fail(msg)
-    return result
-
-
-def _copyHdb(ctx):
-    """ Copy snapshot of HANA DB to NFS server (automation option) """
-    print(_genHeader1(f"Copying snapshot of HANA DB '{ctx.cf.refsys.hdb.sidU}'"
-                      f" to NFS server '{ctx.cf.nfs.host.name}'"))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-hdb-copy'
-    cmd += ctx.ar.commonArgsStr
-    _runCmd(cmd)
-
-
-def _buildImages(ctx):
-    """ Build images for all flavors (automation option) """
-    for flavor in ctx.config.getImageFlavors():
-        print(_genHeader1(f"Building image for flavor '{flavor}'"))
-        cmd = f'time {ctx.cf.build.repo.root}/tools/image-build'
-        cmd += f' -f {flavor}'
-        cmd += ctx.ar.commonArgsStr
-        _runCmd(cmd)
-
-
-def _pushImages(ctx):
-    """ Push images for all flavors to OCP (automation option) """
-    for flavor in ctx.config.getImageFlavors():
-        print(_genHeader1(f"Pushing image for flavor '{flavor}'"))
-        cmd = f'time {ctx.cf.build.repo.root}/tools/image-push'
-        cmd += f' -f {flavor}'
-        cmd += ctx.ar.commonArgsStr
-        _runCmd(cmd)
-
-
-def _setupOverlayShare(ctx):
-    """ Setup an overlay share on NFS server (automation option) """
-    print(_genHeader1('Setting up overlay share'))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-overlay-setup'
-    cmd += ctx.ar.commonArgsStr
-    overlayUuid = _runCmd(cmd).out
-    print(overlayUuid)
-    return overlayUuid
-
-
-def _createDeploymentFile(ctx, overlayUuid):
-    """ Create deployment file (automation option) """
-    overlayUuid = getOverlayUuid(ctx, overlayUuid)
-    deploymentFile = ctx.cf.ocp.deployment.file
-    print(_genHeader1(f"Creating deployment file '{deploymentFile}'"
-                      f" with overlay share '{overlayUuid}'"))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/ocp-deployment-gen'
-    cmd += f' -u {overlayUuid}'
-    cmd += f' -o {deploymentFile}'
-    cmd += ctx.ar.commonArgsStr
-    print(_runCmd(cmd).out)
-
-
-def _startDeployment(ctx):
-    """ Start deployment using deployment file (automation option) """
-    deploymentFile = ctx.cf.ocp.deployment.file
-    print(_genHeader1(f"Starting deployment using file '{deploymentFile}'"))
-    ocLogin(ctx, ctx.cr.ocp.user)
-    CmdShell().run(f'time oc apply -f {deploymentFile}')
-
-
-def _listOverlayShares(ctx):
-    """ List all overlay shares on NFS server (manual option) """
-    print(_genHeader1('List of existing overlay shares:'))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-overlay-list'
-    cmd += ctx.ar.commonArgsStr
-    print(_runCmd(cmd).out)
-
-
-def _tearDownOverlayShare(ctx, overlayUuid):
-    """ Tear down an overlay share on NFS server (manual option) """
-    overlayUuid = getOverlayUuid(ctx, overlayUuid)
-    print(_genHeader1(f'Tearing down overlay share {overlayUuid}'))
-    cmd = f'{ctx.cf.build.repo.root}/tools/nfs-overlay-teardown'
-    cmd += f' -u {overlayUuid}'
-    cmd += ctx.ar.commonArgsStr
-    _runCmd(cmd)
-
-
-def _stopDeployment(ctx):
-    """ Stop deployment using deployment file (manual option) """
-    deploymentFile = ctx.cf.ocp.deployment.file
-    print(_genHeader1(f"Stopping deployment using file '{deploymentFile}'"))
-    ocLogin(ctx, ctx.cr.ocp.user)
-    CmdShell().run(f'time oc delete -f {deploymentFile}')
-
-
 # ----------------------------------------------------------------------
 
 def _main():
+    # pylint: disable=too-many-statements, too-many-branches
 
     ctx = getContext(_getArgs())
 
     addCommonArgsString(ctx)
 
-    overlayUuid = None
+    overlayUuid    = None
+    deploymentFile = None
 
     # ↓↓↓ AUTOMATION OPTIONS ↓↓↓
 
@@ -286,37 +185,53 @@ def _main():
 
     if ctx.ar.execute_all or ctx.ar.hdb_copy:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        _copyHdb(ctx)
+        saveCurrentTime('Copy HDB Start')
+        copyHdb(ctx)
+        saveCurrentTime('Copy HDB End')
 
     # Build images
 
     if ctx.ar.execute_all or ctx.ar.build_images:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        _buildImages(ctx)
+        saveCurrentTime('Build Images Start')
+        buildImages(ctx)
+        saveCurrentTime('Build Images End')
 
     # Push images
 
     if ctx.ar.execute_all or ctx.ar.push_images:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        _pushImages(ctx)
+        saveCurrentTime('Push Images Start')
+        pushImages(ctx)
+        saveCurrentTime('Push Images End')
 
     # Setup overlay share
 
     if ctx.ar.execute_all or ctx.ar.setup_overlay_share:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        overlayUuid = _setupOverlayShare(ctx)
+        saveCurrentTime('Setup Overlay Share Start')
+        overlayUuid = setupOverlayShare(ctx)
+        saveCurrentTime('Setup Overlay Share End')
 
     # Create deployment YAML file
 
     if ctx.ar.execute_all or ctx.ar.create_deployment_file:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        _createDeploymentFile(ctx, overlayUuid)
+        if not overlayUuid:
+            overlayUuid = ctx.ar.overlay_uuid
+        saveCurrentTime('Create Deployment File Start')
+        deploymentFile = createDeploymentFile(ctx, overlayUuid)
+        saveCurrentTime('Create Deployment File End')
 
     # Start deployment
 
     if ctx.ar.execute_all or ctx.ar.start_deployment:
         ctx.ar.execute_all = ctx.ar.execute_all or ctx.ar.execute_rest
-        _startDeployment(ctx)
+        saveCurrentTime('Start Deployment Start')
+        if not deploymentFile:
+            deploymentFile = ctx.ar.deployment_file
+        startDeployment(ctx, deploymentFile=deploymentFile)
+        saveCurrentTime('Start Deployment End')
 
     # ↑↑↑ AUTOMATION OPTIONS ↑↑↑
 
@@ -325,17 +240,27 @@ def _main():
     # List existing overlay shares
 
     if ctx.ar.list_overlay_shares:
-        _listOverlayShares(ctx)
+        saveCurrentTime('List Overlay Shares Start')
+        print(listOverlayShares(ctx))
+        saveCurrentTime('List Overlay Shares End')
 
     # Tear down overlay share
 
     if ctx.ar.tear_down_overlay_share:
-        _tearDownOverlayShare(ctx, overlayUuid)
+        saveCurrentTime('Teardown Overlay Shares Start')
+        if not overlayUuid:
+            overlayUuid = ctx.ar.overlay_uuid
+        tearDownOverlayShare(ctx, overlayUuid)
+        saveCurrentTime('Teardown Overlay Shares End')
 
     # Stop deployment
 
     if ctx.ar.stop_deployment:
-        _stopDeployment(ctx)
+        saveCurrentTime('Stop Deployment Start')
+        if not deploymentFile:
+            deploymentFile = ctx.ar.deployment_file
+        stopDeployment(ctx, deploymentFile=deploymentFile)
+        saveCurrentTime('Stop Deployment End')
 
     # ↑↑↑ MANUAL OPTIONS ↑↑↑
 
@@ -343,8 +268,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

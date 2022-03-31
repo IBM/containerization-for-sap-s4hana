@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,11 +44,10 @@ def _getLogFilePath(logfileDir, infix=''):
 def setupLogging(args, infix=''):
     """ Set up logging """
 
-    # Delete existing root handlers except in case we write log messages to terminal
+    # Delete existing root handlers
 
-    if not args.log_to_terminal:
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
 
     # Custom formatting
 

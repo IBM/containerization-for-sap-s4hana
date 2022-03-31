@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import os
 import pathlib
 import sys
 import types
+import string
 
 import yaml
 
@@ -85,8 +86,13 @@ class ConfigBase:
 
     def create(self, hideDescriptions):
         """ Create new configuration from template """
-        with open(self._templateFile, 'r') as tmplFh:
-            self._instance = yaml.load(tmplFh.read(), Loader=yaml.Loader)
+        try:
+            # pylint: disable=unspecified-encoding
+            with open(self._templateFile, 'r') as tmplFh:
+                self._instance = yaml.load(tmplFh.read(), Loader=yaml.Loader)
+        except IOError:
+            fail(f"Error reading from file {self._templateFile}")
+
         self.edit(hideDescriptions)
 
     def edit(self, hideDescriptions):
@@ -132,10 +138,20 @@ class ConfigBase:
 
         def setValueInteractive(item, path, descs, hideInput):
             default = getDefault(item, path)
-            print(getMsg(item, path, descs))
-            item['value'] = readInput('Enter value', default,
-                                      not item['required'], hideInput, hideInput)
-            print()
+            msg = getMsg(item, path, descs)
+
+            specialChars = True
+            while specialChars:
+                print(msg)
+                item['value'] = readInput('Enter value', default,
+                                          not item['required'], hideInput, hideInput)
+                if set(item['value']).difference(string.printable):
+                    print("Found one or more special characters in input\n"
+                          "This might be a backspace or a tab\n\n"
+                          "Re-enter your input")
+                else:
+                    specialChars = False
+                print()
 
         def editRecursive(item, path, descs, hideInput):
 
@@ -175,8 +191,12 @@ class ConfigBase:
         if not pathlib.Path(fileName).is_file():
             logging.info(f"File '{fileName}' does not exist")
         else:
-            with open(fileName, 'r') as ctFh:
-                contents = ctFh.read()
+            try:
+                # pylint: disable=unspecified-encoding
+                with open(fileName, 'r') as ctFh:
+                    contents = ctFh.read()
+            except IOError:
+                fail(f"Error reading from file {fileName}")
 
         return contents
 
@@ -191,8 +211,12 @@ class ConfigBase:
         return parsed
 
     def _writeFile(self, fileName, contents):
-        with open(fileName, 'w') as wFh:
-            wFh.write(contents)
+        try:
+            # pylint: disable=unspecified-encoding
+            with open(fileName, 'w') as wFh:
+                wFh.write(contents)
+        except IOError:
+            fail(f"Error writing to file {fileName}")
 
     def _write(self, fileName, contents):
         self._writeFile(fileName, yaml.dump(contents))

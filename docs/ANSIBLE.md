@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+  Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ Hat® OpenShift® Container Platform using the Red Hat Ansible CLI.
 - [Running the Playbook](#running-the-playbook)
 - [Verifying the Deployment of the SAP System in the Cluster](#verifying-the-deployment-of-the-sap-system-in-the-cluster)
 - [Connecting to the SAP System](#connecting-to-the-sap-system)
-- [Recovering from Errors](#recovering-from-errors)
+- [Managing the SAP System in the Cluster](#managing-the-sap-system-in-the-cluster)
 
 </details>
 
@@ -52,6 +52,12 @@ Start by cloning this GitHub repository to your build LPAR:
 
 ```shell
   $ git clone https://github.com/IBM/containerization-for-sap-s4hana.git
+```
+
+Change working directory into the repository clone. This directory will be referenced as `<path_to_ocp_tool>` later on.
+
+```shell
+  $ cd containerization-for-sap-s4hana
 ```
 
 Directory `ansible/` of your repository clone contains the following components for building images:
@@ -120,15 +126,19 @@ The following tasks are not automated and need to be performed
 manually (find more details in document
 [*Prerequisites*](PREREQUISITES.md)):
 
-  + Ensure that your file system on the build LPAR has at least 500
-    GB capacity.
+  + See section [*Additional Directories on the Build LPAR*](./PREREQUISITES.md#additional-directories-on-the-build-lpar) to 
+    
+    + Ensure that your file system for image build
+    on the build LPAR has at least 500 GB capacity.
 
-  + Create symbolic links to the directories under which the container
-    images are  built.
+    + Create symbolic links to the directories under which the container
+    images are built.
 
-  + Ensure that the `/etc/hosts` file is existing on your build LPAR.
+  + Ensure that the hostname(s) of the reference SAP system can be resolved,
+    and local name resolution via the `/etc/hosts` file is enabled also on your build LPAR.
 
-  + See the section [*Distributing the SSH Keys*](./PREREQUISITES.md#distributing-the-ssh-keys) that describes how to configure SSH connections between different hosts.
+  + See section [*Distributing the SSH Keys*](./PREREQUISITES.md#distributing-the-ssh-keys) 
+    to configure SSH connections between different hosts.
  
 ## Setting up the Inventory for the Playbook
 
@@ -183,7 +193,7 @@ placeholders of type `<parameter>` with your own settings:
 ```
 ---
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -204,6 +214,10 @@ placeholders of type `<parameter>` with your own settings:
 
 # Path to the directory of the clone of this repository on the build LPAR,required
 path_to_ocp_tool: <github_clone_dir>
+
+# Debug level, the default value is warning,
+# if it's needed change the logging level to critical, error, warning, info, debug, notset 
+debug_level_ocp_tool: warning
 
 # Directory under which the build contexts for image build are assembled
 tmp_root: /data/tmp
@@ -233,8 +247,11 @@ build_user_sshid: ''
 # The build LPAR must be able to connect to api.<ocp_cluster_domain>, required
 ocp_cluster_domain: <ocp4_cluster_domain_name>
 
+# Admin user name of OCP cluster that will be used for setting up configuration, required
+ocp_admin_name: <ocp4_admin>
+
 # Password of the kubeadmin user in OCP cluster,required
-ocp_admin_password: <kubeadmin_password>
+ocp_admin_password: <admin_password>
 
 # User in OCP cluster which is used for "oc" operations, required
 ocp_user_name: <ocp4_userid>
@@ -268,13 +285,8 @@ ocp_helper_node_user_sshid: ''
 # The SAP instance profile must also have this hostname in its name
 nws4_host_name: <reference_system_hostname>
 
-# ASCS and Dialog instance, SAP system ID, required, upper case
+# ASCS and Dialog instance, SAP system ID, required
 nws4_sid: <AppServer_SID>
-
-# SAP system ID of the original SAP NetWeaver or SAP S/4HANA system (lower case)
-# Use lower case "sid" to generate deployment file name
-# Please provide instance number for ASCS and DI
-nws4_sid_lower_case: <AppServer_sid_lower_case>
 
 # ASCS and Dialog instance <sid>adm user, required
 nws4_sidadm_name: <AppServer_sidadm_name>
@@ -293,9 +305,8 @@ nws4_hdbconnect_name: SAPHANADB
 # specify '' if the reference system is a standard system
 nws4_hdbconnect_password: <HDB_connect_password>
 
-# SAP system ID of the original SAP HANA system (lower case)
-# Use lower case "sid" to generate deployment file name, required 
-hdb_sid_deployment: <HDB_sid_name_lower_case>
+# SAP system ID of the original SAP HANA system to generate deployment file name, required 
+hdb_sid_deployment: <HDB_sid_name>
 
 # SAP HANA database <sid>adm user name, required
 hdb_sidadm_name: <HDB_sidadm_user_name>
@@ -347,11 +358,6 @@ nfs_user_name: root
 # Specify '' if password-less access is configured
 nfs_user_password: <NFS_user_password>
 
-# Absolute path to the private SSH ID file which is used for SSH connect operations 
-# from the NFS server to the SAP HANA database instance system, optional
-# If the value is '' then the configured user ssh settings from ~/.ssh/ are used 
-nfs_user_sshid: ''
-
 # Path on nfs_host where directories {data,log} of the original HANA system are copied to, required 
 nfs_path_to_hdb_copy: <NFS_server_export_dir_for_hdb>
 
@@ -396,64 +402,63 @@ started on the cluster.
 
 ## Verifying the Deployment of the SAP System in the Cluster
 
-Access to the SAP system from outside the cluster is enabled by a
-cluster service of type NodePort. Verify whether the service was
-correctly started by running
-
-     $ oc get service/soos-<nws4-sid>-np
-
-     NAME                 TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)                              AGE
-     soos-<nws4-sid>-np   NodePort   172.30.187.181   <none>        32<nws4-di-instno>:<node-port>/TCP   9m9s
-
 To verify that SAP HANA and SAP S/4HANA are running in the cluster use
-this command:
+these commands:
 
 ```shell
-    $ oc describe pod soos-<nws4-sid>
+    $ oc get all
+    $ oc get pods
+    $ oc describe pod soos-<nws4-sid>-<uuid>-<replicaset_id>-<pod_id>
 ```
 
 For more information on verifying the successful deployment of the SAP
-system in the cluster see section [*Verifying the
-Deployment*](VERIFYING-MANAGING.md#verifying-the-deployment). However,
-if your current working directory is `ansible` where the
-`ocp-deployment.yml` playbook runs, activate the virtual environment
-before verifying the deployment and use option `-q creds.yaml`. To do
-this, use the following command, where `<path_to_ocp_tool>` is the
-absolute system path of the containerization tool:
+system in the cluster see section [*Verifying 
+Deployments*](VERIFYING-MANAGING.md#verifying-deployments). However,
+you can also use the following two options to use the tools provided with this project:
 
-```
-    $ cd <path_to_ocp_tool> && source ./venv/bin/activate && ./tools/ocp-pod-status -q ./creds.yaml
-```
+1. Call the tools using our Python virtual environment and the credential file generated by the Ansible playbook.
+
+    To do this, activate the virtual environment, use option `-q creds.yaml` and 
+    use the following command, where `<path_to_ocp_tool>` 
+    is the absolute system path to parent directory of your current working directory `ansible` :
+
+    ```shell
+    $ cd <path_to_ocp_tool> && source ./venv/bin/activate && ./tools/<tool_name> -q ./creds.yaml [tool_options]
+    ```
+
+2. Call the tools using the tool shortcuts.
+
+    To do this, activate the tool shortcuts using the following command and call all tools with the prefix `soos-`.
+    The option `[--add]` can be used to permanent activate the tool shortcuts for bash shell users by adding it to `~/.bashrc`. 
+
+    ```shell
+    $ cd <path_to_ocp_tool> && source ./tools/tool_shortcuts [--add]
+    $ soos-<tool_name> [tool_options]
+    ```
+
+    Complete list of tool shortcuts:
+    
+    ```shell
+    soos-containerize             soos-nfs-overlay-setup        soos-ocp-haproxy-forwarding   soos-ocp-service-account-gen
+    soos-gpg-key-gen              soos-nfs-overlay-teardown     soos-ocp-hdb-secret-gen       soos-sap-system-status
+    soos-image-build              soos-ocp-container-login      soos-ocp-login                soos-ssh-key-gen
+    soos-image-push               soos-ocp-container-run        soos-ocp-pod-meminfo          soos-ssh-keys
+    soos-nfs-hdb-copy             soos-ocp-deployment           soos-ocp-pod-status           soos-verify-config
+    soos-nfs-overlay-list         soos-ocp-etc-hosts            soos-ocp-port-forwarding      soos-verify-ocp-settings
+    ```
+    You can use the `--help` tool option to list all possible parameters for each tool and see also [*Tools*](./TOOLS.md).
 
 ## Connecting to the SAP System
 
-Section [*Managing Your
-Deployment*](VERIFYING-MANAGING.md#managing-your-deployment) describes
-how to connect to the SAP system. Use the following command to connect
-to the SAP system, where `<path_to_ocp_tool>` is the absolute system
-path of the containerization tool:
+Section [*Managing 
+Deployments*](VERIFYING-MANAGING.md#managing-deployments) describes
+how to connect to the SAP system. 
 
-```
-    $ cd <path_to_ocp_tool> && source ./venv/bin/activate && ./tools/ocp-port-forwarding -q ./creds.yaml
-```
+See also [*Introducing Options for End-User GUI Access to the Containerized Systems*](./PORTFORWARD.md#introducing-options-for-end-user-gui-access-to-the-containerized-systems).
 
-## Recovering from Errors
+## Managing the SAP System in the Cluster
 
-In case of playbook execution failure you can delete your deployment
-from the cluster, using the implemented task in
-`tasks/stop-deployment.yml`. Include this task with `import_tasks` in
-a new playbook and run it.
+If you want to stop your SAP System or want to start additional SAP Systems based on the same database content see [*Managing Multiple Copies of the Reference SAP System*](./VERIFYING-MANAGING.md#managing-multiple-copies-of-the-reference-sap-system).
 
-To remove one or more of the previously created images from the local
-podman repository on your build LPAR, list the images by running
+For the final cleanup of unused resources see [*Cleaning up the Environment*](./CLEANUP.md).
 
-``` shell
-$ podman images
-
-```
-
-copy the image ID and remove the image by issuing:
-
-``` shell
-$ podman rmi -f <image-id>
-```

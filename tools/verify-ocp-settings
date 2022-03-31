@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,26 +19,47 @@
 """ Verify OpenShift cluster setup related settings """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    # None
+
+    # Local modules
+
+    from modules.args    import getCommonArgsParser
+    from modules.context import getContext
+    from modules.fail    import fail
+    from modules.startup import startup
+    from modules.verify  import VerifyOcp
+
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
+
+# Functions
 
 
-# Local modules
-
-from modules.args    import getCommonArgs
-from modules.context import getContext
-from modules.verify  import VerifyOcp
-from modules.fail    import fail
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'Verify OpenShift cluster setup related settings'
+    )
+    parser.add_argument(
+        '-func',
+        '--function',
+        required = False,
+        help = 'single test mode for function'
+    )
+    return parser.parse_args()
 
 
 # ----------------------------------------------------------------------
 
+
 def _main():
 
-    ctx = getContext(getCommonArgs(
-        'Verify OpenShift cluster setup related settings'
-    ))
+    ctx = getContext(_getArgs())
 
     # Check settings for OpenShift project and service account
 
@@ -57,8 +78,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

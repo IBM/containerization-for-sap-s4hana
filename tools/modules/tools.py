@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@
 
 # Global modules
 
+# Standard library modules
+
 import contextlib
 import datetime
 import getpass
@@ -27,8 +29,12 @@ import os
 import shutil
 import socket
 import types
-import termcolor
+import traceback
 import yaml
+
+# Non-standard library modules
+
+import termcolor
 
 
 # Local modules
@@ -37,12 +43,16 @@ from modules.command    import (
     CmdShell,
     CmdSsh
 )
-from modules.quantity   import Quantity
-from modules.fail       import fail
 from modules.exceptions import RpmFileNotFoundException
-
+from modules.fail       import fail
+from modules.quantity   import Quantity
+from modules.nfstools     import (
+    getOverlayBase,
+    getValidNfsServerAddress
+)
 
 # Functions
+
 
 @contextlib.contextmanager
 def pushd(newDir):
@@ -59,9 +69,9 @@ def pushd(newDir):
         logging.debug(f"Changed directory back to: '{os.getcwd()}'")
 
 
-def strBold(string):
+def strBold(strVal):
     """ Return string with bold attribute """
-    return termcolor.colored(string, attrs=['bold'])
+    return termcolor.colored(strVal, attrs=['bold'])
 
 
 def readInput(prompt, default, emptyOk, hidden, confirm):
@@ -178,17 +188,24 @@ def getTimestamp(withDecorator):
 def genFileFromTemplate(templatePath, outFilePath, params):
     """ Generate file from template replacing parameters enclosed in "{{...}} """
     content = instantiateTemplate(templatePath, params)
-    with open(outFilePath, 'w') as fh:  # pylint: disable=invalid-name
-        print(content, file=fh)
+    # pylint: disable=invalid-name, unspecified-encoding
+    try:
+        with open(outFilePath, 'w') as fh:
+            print(content, file=fh)
+    except IOError:
+        fail(f"Error writing to file {outFilePath}")
 
 
 def instantiateTemplate(templatePath, params):
     """ Instantiate a template file replacing parameters enclosed in "{{...}} """
-    # pylint: disable=invalid-name
-    with open(templatePath, 'r') as fh:
-        content = fh.read()
-    for (k, v) in params.items():
-        content = content.replace('{{'+k+'}}', v)
+    # pylint: disable=invalid-name, unspecified-encoding
+    try:
+        with open(templatePath, 'r') as fh:
+            content = fh.read()
+        for (k, v) in params.items():
+            content = content.replace('{{'+k+'}}', v)
+    except IOError:
+        fail(f"Error reading from file {templatePath}")
     return content
 
 
@@ -222,18 +239,6 @@ def getHomeDir(ctx, hname, user):
         logging.debug(f"Could not determine the home directory of '{user.name@hname}'")
         return ''
     return res.out
-
-
-def getHdbCopySshCommand(ctx, withLogin=False, reuseCon=True):
-    """ Returns the sshCommand and the secrets to logon from NFS server to
-        the HDB reference system host """
-    hdbHost = ctx.cf.refsys.hdb.host
-    hdbUser = ctx.cr.refsys.hdb.sidadm
-
-    nfsUser   = ctx.cr.nfs.user
-
-    cmdHdbCopySsh = CmdSsh(ctx, hdbHost.ip, hdbUser, nfsUser.sshid, check=False, reuseCon=reuseCon)
-    return cmdHdbCopySsh.getSshCmdAndSecrets(withLogin)
 
 
 def getNumRunningSapProcs(ctx, instance):
@@ -309,6 +314,22 @@ def getDistributionFromRefSystem(ctx, flavor):
     return out.split('"')[1]
 
 
+def ocpMemoryResourcesValid(ctx):
+    """ validates memory resources """
+    containerTypes = list(ctx.cf.ocp.containers.__dict__)
+    for containerType in containerTypes:
+        if containerType == 'init':
+            continue
+
+        if areContainerMemResourcesValid(ctx.cf.ocp, containerType):
+            continue
+
+        print("The specified 'limits' value is less than the "
+              f"requested for container {containerType}")
+        return False
+    return True
+
+
 def areContainerMemResourcesValid(ocp, containerType):
     """ True if limits.memory >= requests.memory  """
     containers = getattr(ocp.containers, containerType)
@@ -333,3 +354,148 @@ def helperIsNfs(ctx):
     """ Return true if the helper host and user are the same as the NFS server host and user """
     return _hostUser1IsHostUser2(ctx.cf.ocp.helper.host, ctx.cr.ocp.helper.user,
                                  ctx.cf.nfs.host, ctx.cr.nfs.user)
+
+
+def getSAPPfparValue(cmdSsh, sidU, instanceType, parameter):
+    """ Return the value of a SAP Profile or environment parameter """
+    if "$(" in parameter:
+        parameter = parameter[2:-1]
+
+    exeDir = getInstanceExe(sidU, instanceType)
+    cmd = f"{exeDir}/sappfpar name={sidU} {parameter}"
+    # sappfpar does not set rc!
+    return cmdSsh.run(cmd).out
+
+
+def getInstanceExe(sidU, instanceType):
+    """ Return exe directory for instance """
+    exeDir = f"/usr/sap/{sidU}/SYS/exe"
+    if instanceType == "hdb":
+        exeDir += "/hdb"
+    elif instanceType == "nws4":
+        exeDir += "/run"
+    else:
+        exeDir = ""
+    return exeDir
+
+
+def getCallingToolName():
+    """ returns name of the tool which was called """
+    return traceback.format_stack()[0].split(',')[0].split(' ')[3].split('"')[1]
+
+
+def getParmsForDeploymentYamlFile(ctx, deployment):
+    """ returns parms for creating the deployment description file """
+    return {
+        # The OCP project name
+        'PROJECT': ctx.cf.ocp.project,
+
+        # OCP deployment name
+        'DEPLOYMENT_NAME': deployment.appName,
+
+        # Overlay Uuid
+        'OVERLAY_UUID': deployment.overlayUuid,
+
+        # Last part of the init image repository name
+        'INIT_IMAGE_NAME_SHORT': ctx.cf.images.init.names.short,
+
+        # Last part of the NWS4 image repository name
+        'NWS4_IMAGE_NAME_SHORT': ctx.cf.images.nws4.names.short,
+
+        # Last part of the HDB image repository name
+        'HDB_IMAGE_NAME_SHORT': ctx.cf.images.hdb.names.short,
+
+        # Name of the ASCS container
+        'NWS4_ASCS_CONTAINER_NAME': ctx.cf.ocp.containers.ascs.name,
+
+        # Name of the DI container
+        'NWS4_DI_CONTAINER_NAME': ctx.cf.ocp.containers.di.name,
+
+        # Name of the HDB container
+        'HDB_CONTAINER_NAME': ctx.cf.ocp.containers.hdb.name,
+
+        # Name of the service account
+        'SERVICE_ACCOUNT_NAME': ctx.cf.ocp.sa.name,
+
+        # --- Parameters for NWS4 Image ---
+
+        # SAPSID of the Netweaver S/4 SAP System
+        'NWS4_SAPSID': ctx.cf.refsys.nws4.sidU,
+
+        # Host name of the original Netweaver S/4 SAP System
+        'NWS4_PQHN': ctx.cf.refsys.nws4.host.name,
+
+        # Domain name of the original Netweaver S/4 SAP System
+        'NWS4_FQHN': ctx.cf.refsys.nws4.sapfqdn,
+
+        # -- Parameters for ASCS Instance ---
+
+        # Instance number of the Netweaver S/4 SAP System ASCS Instance
+        'NWS4_ASCS_INSTNO': ctx.cf.refsys.nws4.ascs.instno,
+
+        # Profile name of ASCS Instance, optional. If empty, default is used
+        'NWS4_ASCS_PROFILE': ctx.cf.refsys.nws4.ascs.profile,
+
+        # Memory request for ASCS container
+        'ASCS_REQUESTS_MEMORY': ctx.cf.ocp.containers.ascs.resources.requests.memory,
+
+        # Memory limit for ASCS container
+        'ASCS_LIMITS_MEMORY': ctx.cf.ocp.containers.ascs.resources.limits.memory,
+
+        # -- Parameters for DI Instance --
+
+        # Instance number of the Netweaver S/4 SAP System Dialog Instance
+        'NWS4_DI_INSTNO': ctx.cf.refsys.nws4.di.instno,
+
+        # Profile name of DI Instance, optional. If empty, default is used
+        'NWS4_DI_PROFILE': ctx.cf.refsys.nws4.di.profile,
+
+        # Secret name
+        'NWS4_DI_DBCREDENTIALS_SECRET': ctx.cf.ocp.containers.di.secret,
+
+        # Memory request for DI container
+        'DI_REQUESTS_MEMORY': ctx.cf.ocp.containers.di.resources.requests.memory,
+
+        # Memory limit for DI container
+        'DI_LIMITS_MEMORY': ctx.cf.ocp.containers.di.resources.limits.memory,
+
+        # --- Parameters for HDB Image ---
+
+        # Rename HDB Host
+        'HDB_RENAME_HOST': ctx.cf.refsys.hdb.rename,
+
+        # SAPSID of the HANA DB System
+        'HDB_SAPSID': ctx.cf.refsys.hdb.sidU,
+
+        # Instance number of the HANA DB System
+        'HDB_INSTNO': ctx.cf.refsys.hdb.instno,
+
+        # Host name of the original HANA DB System
+        'HDB_PQHN': ctx.cf.refsys.hdb.host.name,
+
+        # Host name of the target HANA DB System
+        'HDB_TARGET_HOST': ctx.cf.refsys.nws4.host.name,
+
+        # Directory under which the shared directory of the HANA instance is located
+        'HDB_BASE': ctx.cf.refsys.hdb.base.shared,
+
+        # Directory under which the data directory of the HANA database is located
+        'HDB_BASE_DATA': ctx.cf.refsys.hdb.base.data,
+
+        # Directory under which the log directory of the HANA database is located
+        'HDB_BASE_LOG': ctx.cf.refsys.hdb.base.log,
+
+        # Memory request for HDB container
+        'HDB_REQUESTS_MEMORY': ctx.cf.ocp.containers.hdb.resources.requests.memory,
+
+        # Memory limit for HDB container
+        'HDB_LIMITS_MEMORY': ctx.cf.ocp.containers.hdb.resources.limits.memory,
+
+        # -- Parameters for mounting HANA DB database file systems --
+
+        # IP address of the NFS server
+        'NFS_INTRANET_IP': getValidNfsServerAddress(ctx),
+
+        # Parent dir on NFS Server
+        'NFS_PARENT_DIR': getOverlayBase(ctx, deployment.overlayUuid),
+    }

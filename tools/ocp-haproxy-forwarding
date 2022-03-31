@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+
+# ------------------------------------------------------------------------
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+""" HAProxy port forwarding for creating connections to the containerized SAP system """
+
+try:
+    # Global modules
+
+    import logging
+    import re
+
+    # Local modules
+    from modules.startup    import startup
+    from modules.args       import (
+        getCommonArgsParser,
+        addArgAppName
+    )
+    from modules.command    import CmdSsh
+    from modules.context    import getContext
+    from modules.fail       import fail
+    from modules.ocp        import Ocp
+    from modules.deployment import Deployments
+    from modules.tools      import strBold
+
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
+
+
+# Functions
+def _getArgs():
+    """ Get command line arguments """
+    parser = getCommonArgsParser(
+        'HAproxy configuration on OCP helper node for creating '
+        'SAPGUI/ HDBSQL connections to the containerized SAP system'
+    )
+
+    addArgAppName(parser)
+
+    parser.add_argument(
+        '-a',
+        '--add',
+        required = False,
+        action   = 'store_true',
+        help     = "Add NodePorts to the HAproxy configuration"
+    )
+
+    parser.add_argument(
+        '-l',
+        '--list',
+        required = False,
+        action   = 'store_true',
+        help     = "Display HAproxy configuration"
+    )
+
+    parser.add_argument(
+        '-r',
+        '--remove',
+        required = False,
+        action   = 'store_true',
+        help     = "Remove NodePorts from the HAproxy configuration"
+    )
+
+    return parser.parse_args()
+
+
+def _getChkSum(cmdSsh, haproxyCfg):
+    """ Get MD5 check sum of HAProxy config file """
+    cmd = f'md5sum {haproxyCfg} | cut -d" " -f1'
+    return cmdSsh.run(cmd).out
+
+
+def _getListeningPorts(cmdSsh):
+    """ Get all ports which are already in use on the node """
+    logging.debug('>>> _getListeningPorts')
+    cmd  =  'netstat --numeric --listening --tcp -4'
+    # Sample output from netstat
+    #
+    # Proto  Recv-Q  Send-Q  Local Address  Foreign Address  State
+    # tcp    0       0       0.0.0.0:30113  0.0.0.0:*        LISTEN
+    # tcp    0       0       0.0.0.0:30115  0.0.0.0:*        LISTEN
+    # tcp    0       0       0.0.0.0:3203   0.0.0.0:*        LISTEN
+    #
+    # Looking Proto tcp, column "Local Address", port is behind the ':'
+    res  =  ''
+    stdout = cmdSsh.run(cmd).out.split('\n')
+    for line in stdout:
+        col = line.split()
+        if 'tcp' in col[0]:
+            res += col[3].split(':')[1]
+            res += ' '
+    logging.debug(f'>>> Result: {res.split()}')
+    return res.split()
+
+
+def _confirmPortStillFree(cmdSsh, port):
+    """ Check if the requested port is still not in use """
+    cmd = 'netstat --numeric --listening --tcp -4'
+    # Sample output from netstat
+    #
+    # Proto  Recv-Q  Send-Q  Local Address  Foreign Address  State
+    # tcp    0       0       0.0.0.0:30113  0.0.0.0:*        LISTEN
+    # tcp    0       0       0.0.0.0:30115  0.0.0.0:*        LISTEN
+    # tcp    0       0       0.0.0.0:3203   0.0.0.0:*        LISTEN
+    #
+    # Looking Proto tcp, column "Local Address", port is behind the ':'
+    # If port is now occupied, return False
+    stdout = cmdSsh.run(cmd).out.split('\n')
+    for line in stdout:
+        col = line.split()
+        if 'tcp' in col[0]:
+            lport = col[3].split(':')[1]
+            if port == lport:
+                return False
+    return True
+
+
+def _searchFreeInstno(instno, portList, checkList):
+    """ Find a free effective Instance Number by checking for free ports """
+    # Argument portList is a list containing the required ports,
+    # where xx is an replacement for the SAP instance number
+    # Argument reservedList is an additional check for ports that shall be reserved
+    logging.debug(f'>>> Searching for a free instno (starting from {instno}) <<<')
+    logging.debug(f'>>> for all ports in {portList}) <<<')
+    logging.debug(f'>>> Already occupied ports: {checkList}) <<<')
+    freeInstNo = -1
+    freePorts  = []
+    instnoMin = int(instno)
+    instnoMax = int(instno) + 100
+    for i in range(instnoMin, instnoMax):
+        for portStr in portList:
+            port = int(portStr.replace('xx', f'{i % 100:02d}'))
+            if str(port) not in checkList:
+                logging.debug(f'>>> port {port} is not in use) <<<')
+                freePorts.append(port)
+            else:
+                logging.debug(f'>>> port {port} is in use) <<<')
+                freePorts = []
+                break
+
+        if freePorts:
+            freeInstNo = int(i)
+            break
+
+    if freePorts:
+        logging.debug(f'>>> InstNo {freeInstNo:02d} is free: Port List {freePorts} <<<')
+    else:
+        logging.debug('>>> There is no free instNo in the range available ! <<<')
+
+    return freeInstNo, freePorts
+
+
+def _copyHaproxyCfg(ctx, cmdSsh, cfgFile):
+    """ Copy the original HAproxy config """
+    logging.debug('>>> _copyHaproxyCfg')
+    cmd = f'cp {ctx.cs.haproxyCfg} {cfgFile}'
+    return cmdSsh.run(cmd)
+
+
+def _searchHaproxyEntry(cmdSsh, cfgFile, hdr, port):
+    """ Check, if there is already a HAproxy section on the node """
+    logging.debug(f'>>> _searchHaproxyEntry: Search for {port} entries <<<')
+    res = ""
+    check = f"listen {hdr}-{port}".replace("xx", "..")
+    out = cmdSsh.run(f"grep -x \"{check}\" {cfgFile} | head -1").out
+    if out != "":
+        logging.debug(f'>>> _searchHaproxyEntry: Found {out} <<<')
+        for i, checkPattern in enumerate(check):
+            if checkPattern != out[i]:
+                res += out[i]
+        return int(res)
+    return -1
+
+
+def _checkHaproxyEntry(cmdSsh, cfgFile, hdr, port):
+    """ Check, if there is already a HAproxy section on the node """
+    logging.debug('>>> _checkHaproxyEntry')
+    check = f"{hdr}-{port}"
+    cmd = f'grep -q "^listen {check}" {cfgFile}'
+    return cmdSsh.run(cmd).rc == 0
+
+
+def _addHaproxyEntry(cmdSsh, cfgFile, hdr, port, workerStr):
+    """ Create a new HAproxy section on the node """
+    logging.debug(f'>>> Add HAproxy conf: Listen port {port}, forward to {workerStr}')
+    cmd  = f"echo \"listen {hdr}-{port}\n"
+    cmd += f"    bind *:{port}\n"
+    cmd += "    option tcplog\n"
+    cmd += f"    server {workerStr} check\n\n\" >> {cfgFile}"
+    return cmdSsh.run(cmd)
+
+
+def _getHaproxyAppNameEntries(cmdSsh, cfgFile, hdr):
+    """ List already existing HAproxy entry on the node """
+    logging.debug('>>> _getHaproxyAppNameEntries')
+    cmd  = f'sed -n "/listen {hdr}-.*/,/^$/p" {cfgFile} | '
+    cmd += 'sed "s/bind.*:/Listen on port /;'
+    cmd += r'/.*option.*/d;s/server \(.*\) \(.*\) check/Forward to \\2 (\\1)/"'
+    return cmdSsh.run(cmd).out
+
+
+def _removeHaproxyEntry(cmdSsh, cfgFile, hdr, port):
+    """ Remove already existing HAproxy section on the node """
+    logging.debug(f'>>> Remove HAproxy sections {hdr}-{port}')
+    cmd  = f'sed -i "/listen {hdr}-{port}/,/^$/d" {cfgFile}'
+    return cmdSsh.run(cmd).out
+
+
+def _removeHaproxyAppNameEntries(ctx, cmdSsh, appName):
+    """ Remove already existing HAproxy sections on the node """
+    cfgFile = f'{ctx.cs.haproxyCfg}-{appName}'
+    _copyHaproxyCfg(ctx, cmdSsh, cfgFile)
+    print(f"Remove sections for SAP system {strBold(ctx.cf.refsys.nws4.sidU)}\n"
+          f"deployment {strBold(appName)}\n"
+          f"in HAproxy config {strBold(cfgFile)}\n"
+          f"on {strBold(ctx.cf.ocp.domain)} "
+          f"helper node {strBold(ctx.cf.ocp.helper.host.name)}\n")
+    logging.debug(f'>>> Remove HAproxy sections {appName}-* in {cfgFile}')
+    cmd  = f'sed -i "/listen {appName}-.*/,/^$/d" {cfgFile}'
+    cmdSsh.run(cmd)
+    _reloadHaproxyService(ctx, cmdSsh, cfgFile)
+
+
+def _reloadHaproxyService(ctx, cmdSsh, cfgFile):
+    """ Restart HAproxy section with cfgFile on the node """
+    logging.debug('>>> _ActivateHaproxyService')
+    cmd  = f'cp {ctx.cs.haproxyCfg} {ctx.cs.haproxyCfg}.sv'
+    cmd += f' && sed -i "N;/^\\n$/D;P;D;" {cfgFile}'
+    cmd += f' && mv {cfgFile} {ctx.cs.haproxyCfg}'
+    cmd +=  ' && systemctl reload haproxy.service'
+    return cmdSsh.run(cmd)
+
+
+def _haproxyUpdateError(reason):
+    """ Either the configuration changed, or the port is not free any more """
+    msg  = strBold('Cannot update configuration for HAProxy:\n')
+    msg += f'{strBold(reason)}'
+    msg +=  '\nPlease rerun the tool once again'
+    fail(msg)
+
+
+def _printConnMessageDi(ctx, instno, appName):
+    """ Print Connection Message for SAP DI instance """
+    sep1 = '-'*40
+    print(f"\nEstablishing port forwarding to SAP system '{ctx.cf.refsys.nws4.sidU}'\n"
+          f"deployment '{appName}'\n"
+          f"in cluster '{ctx.cf.ocp.domain}'\n\n"
+          f'Use the following parameters to create a SAP GUI connection:\n\n'
+          f'{sep1}\n'
+          f'   System ID           {ctx.cf.refsys.nws4.sidU}\n'
+          f'   Instance Number     {instno:02d}\n'
+          f'   Application Server  {ctx.cf.ocp.helper.host.name.split(".")[0]}'
+          f'   ({ctx.cf.ocp.helper.host.ip})\n'
+          f'{sep1}\n')
+
+
+def _printConnMessageHdb(ctx, instno):
+    """ Print Connection Message for SAP HDB instance """
+    sep1 = '-'*40
+    sep2 = '.'*63
+    mapHdbHost = 'map_' + ctx.cf.ocp.helper.host.name.split(".")[0]
+    padd = max(len("use_default_route")-len(mapHdbHost), 1)
+
+    print(f'\nUse the following parameters to create a HANA Studio connection:\n\n'
+          f'{sep1}\n'
+          f'   Host Name           {ctx.cf.ocp.helper.host.name.split(".")[0]}'
+          f'   ({ctx.cf.ocp.helper.host.ip})\n'
+          f'   Instance Number     {instno:02d}\n'
+          f'   System ID           {ctx.cf.refsys.hdb.sidU}\n'
+          f'{sep1}\n'
+          f'{sep2}\nTo connect to the {strBold("tenant DB")}'
+          f' with {strBold("SAP HANA Studio")} it is required\n'
+          f'to set a new entry in the SAP HANA DB parameter {strBold("global.ini")} file\n'
+          f'In section {strBold("public_hostname_resolution")}:\n'
+          f'    - Ensure Key: {strBold("use_default_route")}'
+          f' has  value {strBold("ip")} (default)\n'
+          f'    - Add    Key: {strBold(mapHdbHost)}{" ":{padd}s}'
+          f' with value {strBold(ctx.cf.ocp.helper.host.ip)}\n'
+          f'Use scope {strBold("System")} for the parameter change\n{sep2}')
+
+
+def _listHaproxyAppNameEntries(ctx, cmdSsh, appName):
+    """ List all AppName entries in HAProxy config """
+    diInstno = -1
+    hdbInstno = -1
+    result = _getHaproxyAppNameEntries(cmdSsh, ctx.cs.haproxyCfg, appName)
+    if result == "":
+        status = 'not active'
+        active = False
+    else:
+        diPattern = 'di-32([0-9][0-9])'
+        regex = re.compile(diPattern)
+        match = regex.findall(result)
+        if match:
+            diInstno = int(match[0])
+
+        hdbPattern = 'hdb-3([0-9][0-9])[0-9]'
+        regex = re.compile(hdbPattern)
+        match = regex.findall(result)
+        if match:
+            hdbInstno = int(match[0])
+
+        status = 'active'
+        active = True
+
+    print(f"Port forwarding to SAP system {strBold(ctx.cf.refsys.nws4.sidU)}\n"
+          f"deployment {strBold(appName)}\n"
+          f"in Red Hat OpenShift Container Platform {strBold(ctx.cf.ocp.domain)}\n"
+          f"via HAproxy on {strBold(ctx.cf.ocp.helper.host.name)}"
+          f" is {strBold(status)}\n\n{result}\n")
+
+    if diInstno != -1:
+        _printConnMessageDi(ctx, diInstno, appName)
+    if hdbInstno != -1:
+        _printConnMessageHdb(ctx, hdbInstno)
+    return active
+
+
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def _addHaproxyAppNameEntries(ctx, ocp, cmdSsh, appName, chkSumInit):
+    """ Add new AppName entries in HAProxy config """
+
+    cfgFile     = f'{ctx.cs.haproxyCfg}-{appName}'
+    _copyHaproxyCfg(ctx, cmdSsh, cfgFile)
+    portsUsed  = _getListeningPorts(cmdSsh)
+
+    diPort = []
+    diNodePort = []
+    hdbPort = []
+    hdbNodePort = []
+
+    logging.debug('>>> Analyze NodePortList: <<<')
+    for nodePort in ocp.getNodePortList():
+        # Fetch Name and NodePort fields from "oc get service" output
+        #
+        # Name needs to be of form <instance>-<port pattern> with instance di or hdb,
+        # in the port pattern xx will be replaced with an "effective" SAP Instno
+        #
+        # in getNodePortList Name and NodePort pairs are separated by :
+        # and multiple Name:NodePort tuples are separated by ,
+        logging.debug(f'   >>> Got element: {nodePort} <<<')
+        elem = nodePort.split(':')
+
+        if nodePort.startswith("di"):
+            diPort.append(elem[0].split('-')[1])
+            diNodePort.append(elem[1])
+        elif nodePort.startswith("hdb"):
+            hdbPort.append(elem[0].split('-')[1])
+            hdbNodePort.append(elem[1])
+
+    if diPort:
+        diInstno = _searchHaproxyEntry(cmdSsh, ctx.cs.haproxyCfg, appName, "di-"+diPort[0])
+        if diInstno != -1:
+            diPort = [d.replace('xx', f'{diInstno:02d}') for d in diPort]
+        else:
+            diInstno, diPort = _searchFreeInstno(ctx.cf.refsys.nws4.di.instno, diPort, portsUsed)
+
+            if diInstno != -1:
+                portsUsed += diPort
+            else:
+                fail('Cannot find free local ports for the SAP DI to bind to')
+
+    if hdbPort:
+        hdbInstno = _searchHaproxyEntry(cmdSsh, ctx.cs.haproxyCfg, appName, "hdb-"+hdbPort[0])
+        if hdbInstno != -1:
+            hdbPort = [d.replace('xx', f'{hdbInstno:02d}') for d in hdbPort]
+        else:
+            hdbInstno, hdbPort = _searchFreeInstno(ctx.cf.refsys.hdb.instno, hdbPort, portsUsed)
+
+            if hdbInstno != -1:
+                portsUsed += hdbPort
+            else:
+                fail('Cannot find free local ports for the SAP HANA DB to bind to')
+
+    for ins in ['di', 'hdb']:
+        if ins == 'di':
+            portList = diPort
+            nodePortList = diNodePort
+        elif ins == 'hdb':
+            portList = hdbPort
+            nodePortList = hdbNodePort
+
+        hdr = appName + '-' + ins
+
+        for i, port in enumerate(portList):
+            if _checkHaproxyEntry(cmdSsh, ctx.cs.haproxyCfg, hdr, port):
+                _removeHaproxyEntry(cmdSsh, cfgFile, hdr, port)
+                portUpdate = True
+            else:
+                portUpdate = False
+
+            if portUpdate or _confirmPortStillFree(cmdSsh, port):
+                worker = f'{ocp.getWorkerName()} {ocp.getWorkerIp()}:{nodePortList[i]}'
+                _addHaproxyEntry(cmdSsh, cfgFile, hdr, port, worker)
+            else:
+                _haproxyUpdateError(f'Port {port} is in use')
+                return 1
+
+    if _getChkSum(cmdSsh, ctx.cs.haproxyCfg) == chkSumInit:
+        _reloadHaproxyService(ctx, cmdSsh, cfgFile)
+        if diPort:
+            _printConnMessageDi(ctx, diInstno, appName)
+        if hdbPort:
+            _printConnMessageHdb(ctx, hdbInstno)
+        return 0
+
+    msg = f'HAProxy file {ctx.cs.haproxyCfg} got changed by someone else'
+    _haproxyUpdateError(msg)
+    return 1
+
+
+# ----------------------------------------------------------------------
+def _main():
+
+    ctx = getContext(_getArgs())
+    ocp = Ocp(ctx)
+    deployments = Deployments(ctx, ocp, deploymentType = ctx.cs.deployRunning)
+    appName = deployments.getValidAppName()
+    ocp.setAppName(appName)
+
+    cmdSsh     = CmdSsh(ctx, ctx.cf.ocp.helper.host.name, ctx.cr.ocp.helper.user)
+
+    if ctx.ar.list:
+        _listHaproxyAppNameEntries(ctx, cmdSsh, appName)
+        return 0
+
+    chkSumInit = _getChkSum(cmdSsh, ctx.cs.haproxyCfg)
+
+    if ctx.ar.remove:
+        if _getChkSum(cmdSsh, ctx.cs.haproxyCfg) == chkSumInit:
+            _removeHaproxyAppNameEntries(ctx, cmdSsh, appName)
+            return 0
+        msg = f'HAProxy file {ctx.cs.haproxyCfg} got changed by someone else'
+        _haproxyUpdateError(msg)
+        return -1
+
+    if not ctx.ar.add:
+        fail("Specify exactly one of '-a' or '-r' ('-h' for help)")
+
+    _addHaproxyAppNameEntries(ctx, ocp, cmdSsh, appName, chkSumInit)
+
+    return 0
+# ----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+    startup(_main)

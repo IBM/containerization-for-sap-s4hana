@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,18 +19,24 @@
 """ Log into an OpenShift cluster as regular user or as admin user """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
+    # None
 
+    # Local modules
 
-# Local modules
+    from modules.args    import getCommonArgsParser
+    from modules.command import CmdShell
+    from modules.context import getContext
+    from modules.fail    import fail
+    from modules.ocp     import Ocp
+    from modules.startup import startup
 
-from modules.args    import getCommonArgsParser
-from modules.command import CmdShell
-from modules.context import getContext
-from modules.fail    import fail
-from modules.ocp     import ocLogin
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -57,6 +63,13 @@ def _getArgs():
         help     = "Log into OCP as admin user"
     )
 
+    parser.add_argument(
+        '--project-ignore',
+        required = False,
+        action   ='store_true',
+        help     = "Errors during setProject are ignored if set to False"
+    )
+
     return parser.parse_args()
 
 
@@ -68,15 +81,26 @@ def _main():
 
     msg = "Specify excactly one of '-u' or '-a' ('-h' for help)"
 
+    setProject = True
+
+    if ctx.ar.project_ignore:
+        setProject = False
+
     if ctx.ar.user:
         if not ctx.ar.admin:
-            print(ocLogin(ctx, ctx.cr.ocp.user))
+            ocp = Ocp(ctx, login="user", logout=False, setProject = setProject)
+            result = ocp.ocLogin()
+            del ocp
+            print(result.out)
         else:
             fail(msg)
 
     elif ctx.ar.admin:
         if not ctx.ar.user:
-            print(ocLogin(ctx, ctx.cr.ocp.admin))
+            ocp = Ocp(ctx, login="admin", logout=False, setProject = setProject)
+            result = ocp.ocLogin()
+            del ocp
+            print(result.out)
         else:
             fail(msg)
 
@@ -89,8 +113,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

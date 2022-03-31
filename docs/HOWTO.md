@@ -1,6 +1,6 @@
 <!--
   ------------------------------------------------------------------------
-  Copyright 2021 IBM Corp. All Rights Reserved.
+  Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
  -------------------------------------------------------------------------->
+
 # How To
 
 This document contains detailed instructions on how to perform
@@ -37,9 +38,20 @@ specific tasks in the context of containerization of SAP® systems.
 
 ## Connecting to the SAP® S/4HANA® Database using SAP HANA Studio®
 
-Start *tools/ocp-port-forwarding* on the build LPAR. 
+To set up to connectivity to your SAP system running on a Red Head OpenShift Container Platform
+you can use either
+-  ```shell
+   tools/ocp-port-forwarding
+   ```
+or 
+- ```shell
+  tools/ocp-haproxy-forwarding --add
+  ```
 
-Once started, the connection details for SAP HANA Studio will be shown:
+While `tools/ocp-port-forwarding` remains active as foreground process, 
+`tools/ocp-haproxy-forwarding` updates the HAProxy configuration on the helper node.
+
+Both tools report the connection details for SAP HANA Studio access:
 
 ```shell
 Use the following parameters to create an SAP HANA Studio connection:
@@ -56,42 +68,44 @@ In section public_hostname_resolution:
 Use scope System for the parameter change
 ----------------------------------------
 ```
+
 ### Connecting to the System Database with SAP HANA Studio
 
-When the SAP HANA database is up and running in the container, and port forwarding is established by *tools/ocp-port-forwarding*, then the system database can be registered in SAP HANA Studio.
+When the SAP HANA database is up and running in the container, and port forwarding is established by `tools/ocp-port-forwarding` or `tools/ocp-haproxy-forwarding`, then the system database can be registered in SAP HANA Studio.
 
 Launch **SAP HANA Studio**, and select **Add System**:
 
 <img src="images/howto/hana_studio_1.png" alt="hana_studio_1" title="SAP HANA Studio 1" width="228" height="84" />
 
-Enter the SAP HANA connection parameters (**Host Name**, effective **Instance Number**) as listed by *tools/ocp-port-forwarding*
+Enter the SAP HANA connection parameters (**Host Name**, effective **Instance Number**) as listed by `tools/ocp-port-forwarding`
 
-Select checkboxes “**Multiple Containers**” and  “**System database**”, then enter a **Description** of your choice:
+Select checkboxes **Multiple Containers** and **System database**, then enter a **Description** of your choice:
 
 <img src="images/howto/hana_studio_2.png" alt="hana_studio_2" title="SAP HANA Studio 2" width="520" height="337" />
 
 choose **Next**.
 
-Register the SAP system database using an **User Name** having the desired privileges. Create an appropriate technical user with privileges according to the role (backup, monitoring, managing roles and users, … ) in the database before. 
+Register the SAP system database using an **User Name** having the desired privileges. Create an appropriate technical user with privileges according to the role (backup, monitoring, managing roles and users, … ) in the database before.
 
 In the example, the SYSTEM user is used.
 
 <img src="images/howto/hana_studio_3.png" alt="hana_studio_3" title="SAP HANA Studio 3" width="517" height="255" />
 
-Afterwards, press **Finish** to start the registration. 
+Afterwards, press **Finish** to start the registration.
 
 If registration is successful and communication to the pod is possible, the SYSTEMDB will appear in the menu with a “green” state:
 
 <img src="images/howto/hana_studio_4.png" alt="hana_studio_4" title="SAP HANA Studio 4" width="330" height="115" />
 
 ### Adapting the SAP HANA Configuration
+
 Hostname and IP address used within the pod are not visible outside the OpenShift Container Platform. The entry point for SAP HANA Studio is different to the pod, so communication settings need to be adjusted in the SAP HANA configuration.
- 
+
 In SAP HANA Studio, open the **Administration Tab** for the System DB, Select Tab **Configuration**, and search for parameter *public_hostname_resolution* in global.ini:
 
 <img src="images/howto/hana_studio_5.png" alt="hana_studio_5" title="SAP HANA Studio 5" width="805" height="211" />
 
-There should be only one entry with name *use_default_route* and default value *ip*. 
+There should be only one entry with name *use_default_route* and default value *ip*.
 
 Add a second entry within the *public_hostname_resolution* section.  Right click, and select **Add parameter**
 
@@ -101,7 +115,7 @@ Select the *System wide* **Scope**:
 
 <img src="images/howto/hana_studio_7.png" alt="hana_studio_7" title="SAP HANA Studio 7" width="280" height="107" />
 
-For key enter *map_\<hostname\>* and for value the *IP address* of the system hosting the SSH tunnels as reported from *tools/ocp-port-forwarding*
+For key enter *map_\<hostname\>* and for value the *IP address* of the system hosting the SSH tunnels as reported from `tools/ocp-port-forwarding`
 
 <img src="images/howto/hana_studio_8.png" alt="hana_studio_8" title="SAP HANA Studio 8" width="517" height="167" />
 
@@ -115,16 +129,20 @@ Open SAP HANA Studio, and select **Add System**:
 
 <img src="images/howto/hana_studio_1.png" alt="hana_studio_1" title="SAP HANA Studio 1" width="228" height="84" />
 
-Enter the SAP HANA connection parameters as listed from *tools/ocp-port-forwarding* (**Host Name**, effective **Instance Number**). 
+Enter the SAP HANA connection parameters as listed from *tools/ocp-port-forwarding* (**Host Name**, effective **Instance Number**).
 
-Select Mode “**Multiple Containers**” and checkmark “**Tenant database**”, enter the **SID** of the tenant, 
+Select Mode **Multiple Containers** and checkmark **Tenant database**, enter the **SID** of the tenant,
 and a **Description** of your choice:
 
 <img src="images/howto/hana_studio_9.png" alt="hana_studio_9" title="SAP HANA Studio 9" width="517" height="339" />
 
 choose **Next**.
 
-Register with a User Name with sufficient privileges. 
+:warning: In case a port different than `3<NN>15` is used as SQL/MDX port
+for the tenant database, e.g. port `3<NN>41`, then you need to enter the
+**Host Name** as `<hostname>:<port>` for the HANA Studio configuration.
+
+Register with a User Name with sufficient privileges.
 You can use the ABAP connect user at first, or create an appropriate technical user with limited privileges according to the purpose (backup, monitoring, managing roles and users, … )
 
 <img src="images/howto/hana_studio_10.png" alt="hana_studio_10" title="SAP HANA Studio 10" width="517" height="257" />

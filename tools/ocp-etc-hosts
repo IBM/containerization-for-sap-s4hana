@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2020, 2021 IBM Corp. All Rights Reserved.
+# Copyright 2020, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,16 +19,22 @@
 """ Add OpenShift cluster domain entries to '/etc/hosts' """
 
 
-# Global modules
+try:
+    # Global modules
 
-import shutil
-import sys
+    import shutil
 
+    # Local modules
 
-# Local modules
+    from modules.args    import getCommonArgs
+    from modules.context import getContext
+    from modules.startup import startup
+    from modules.fail    import fail
 
-from modules.args    import getCommonArgs
-from modules.context import getContext
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -57,12 +63,16 @@ def _main():
     hostEntry = f'{helperIp}\t'+' '.join(fqdns)
 
     found = []
-    with(open(etcHosts, 'r')) as fh:  # pylint: disable=invalid-name
-        for line in fh.readlines():
-            if line.strip().startswith('#'):
-                continue
-            if ocpDomain in line:
-                found.append(line)
+    try:
+        # pylint: disable=invalid-name, unspecified-encoding
+        with(open(etcHosts, 'r')) as fh:
+            for line in fh.readlines():
+                if line.strip().startswith('#'):
+                    continue
+                if ocpDomain in line:
+                    found.append(line)
+    except IOError:
+        fail(f"Error reading from file {etcHosts}")
 
     if found:
         print(f"\nThe following line(s) in '{etcHosts}' already"
@@ -76,8 +86,12 @@ def _main():
     else:
         backup = f'{etcHosts}.orig'
         shutil.copy2(etcHosts, backup)
-        with open(etcHosts, 'a') as fh:  # pylint: disable=invalid-name
-            print(f'\n# Added by ocp-etc-hosts:\n{hostEntry}', file=fh)
+        try:
+            # pylint: disable=invalid-name, unspecified-encoding
+            with open(etcHosts, 'a') as fh:
+                print(f'\n# Added by ocp-etc-hosts:\n{hostEntry}', file=fh)
+        except IOError:
+            fail(f"Error writing to file {etcHosts}")
         print(f"\nAdded the following line to file '{etcHosts}'\n\n{hostEntry}\n")
         print(f"Stored backup of original '{etcHosts}' in '{backup}'\n")
 
@@ -85,8 +99,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

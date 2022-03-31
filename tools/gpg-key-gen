@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,22 +19,28 @@
 """ Generate a GPG private / public key pair """
 
 
-# Global modules
+try:
+    # Global modules
 
-import getpass
-import os
-import pwd
-import socket
-import sys
+    import getpass
+    import os
+    import pwd
+    import socket
+    import sys
 
-import gnupg
+    import gnupg
 
+    # Local modules
 
-# Local modules
+    from modules.args    import getCommonArgs
+    from modules.context import getContext
+    from modules.logger  import logging
+    from modules.startup import startup
 
-from modules.args    import getCommonArgs
-from modules.context import getContext
-from modules.logger  import logging
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -89,8 +95,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)

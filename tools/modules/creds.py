@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -130,9 +130,12 @@ class Creds(ConfigBase):
                 while not credsRead:
                     # Repeat until read and decrypt were successful
                     # (i.e. until GPG agent responded or correct password was supplied)
-                    with open(credsFile, 'rb') as credsFh:
-                        credsDec = self._gpg.decrypt_file(credsFh, passphrase=self._passphrase)
-                    credsRead = credsDec.ok
+                    try:
+                        with open(credsFile, 'rb') as credsFh:
+                            credsDec = self._gpg.decrypt_file(credsFh, passphrase=self._passphrase)
+                        credsRead = credsDec.ok
+                    except IOError:
+                        fail(f"Error reading from {credsFile}")
 
                 self._setRecipient(credsDec)
 
@@ -174,5 +177,9 @@ class Creds(ConfigBase):
                 fail(f"Encryption failed\n"
                      f" Status: '{credsEnc.status}'\n Stderr: '{credsEnc.stderr}'")
 
-            with open(credsFile, 'w') as credsFh:
-                credsFh.write(str(credsEnc))
+            try:
+                # pylint: disable=unspecified-encoding
+                with open(credsFile, 'w') as credsFh:
+                    credsFh.write(str(credsEnc))
+            except IOError:
+                fail(f"Error writing to {credsFile}")

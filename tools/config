@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ------------------------------------------------------------------------
-# Copyright 2021 IBM Corp. All Rights Reserved.
+# Copyright 2021, 2022 IBM Corp. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,18 +19,23 @@
 """ Configuration management """
 
 
-# Global modules
+try:
+    # Global modules
 
-import sys
-import yaml
+    import yaml
 
+    # Local modules
 
-# Local modules
+    from modules.args     import getCommonArgsParser
+    from modules.config   import Config
+    from modules.context  import getContext
+    from modules.nestedns import nestedNsToObj
+    from modules.startup  import startup
 
-from modules.args       import getCommonArgsParser
-from modules.context    import getContext
-from modules.config     import Config
-from modules.nestedns   import nestedNsToObj
+except ModuleNotFoundError as mnfex:
+    from modules.exceptions import setExceptHook
+    setExceptHook()
+    raise mnfex
 
 
 # Functions
@@ -91,9 +96,9 @@ def _main():
     ctx = getContext(_getArgs(), withCreds=True, withConfig=False)
 
     if ctx.ar.new:
-        config = Config(ctx, create=True)
+        config = Config(ctx, create=True, failOnDiscoveryError=False)
     else:
-        config = Config(ctx, create=False)
+        config = Config(ctx, create=False, failOnDiscoveryError=False)
 
     if ctx.ar.new:
         config.create(ctx.ar.suppress_descriptions)
@@ -117,8 +122,4 @@ def _main():
 # ----------------------------------------------------------------------
 
 if __name__ == '__main__':
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print()
-    sys.exit(0)
+    startup(_main)
