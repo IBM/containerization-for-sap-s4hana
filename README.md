@@ -54,8 +54,8 @@ Systems™.
 
 ## Important Note
 
-**This is a beta release and targets for test and other non-production
-landscapes. The created deliverables are not supported by SAP nor
+**This release targets test and other non-production landscapes. The
+created deliverables are not supported by SAP nor
 agreed to a roadmap for official support in current state (see also
 SAP Note 1122387 - *Linux: SAP Support in virtualized environments*)**
 
@@ -74,9 +74,9 @@ documents:
 
   - Setup Red Hat OpenShift on IBM PowerVM servers managed using HMC
 
-    - Complete automated setup [*Red Hat OpenShift on IBM PowerVM servers managed using HMC*](https://github.com/ocp-power-automation/ocp4-upi-powervm-hmc) (External project)
-    or
-    - Complete setup with manual steps [*Helper Node Quickstart Install*](https://github.com/redhat-cop/ocp4-helpernode/blob/main/docs/quickstart-powervm.md) (External project)
+    - Complete automated setup, see external project [*Red Hat OpenShift on IBM PowerVM servers managed using HMC*](https://github.com/ocp-power-automation/ocp4-upi-powervm-hmc) or
+
+    - Complete setup with some manual steps, see external project [*Helper Node Quickstart Install*](https://github.com/redhat-cop/ocp4-helpernode/blob/main/docs/quickstart-powervm.md)
 
   - [*Containerization for SAP S/4HANA with Red Hat OpenShift on IBM Power Systems Virtual Servers*](docs/POWERVS.md#containerization-for-sap-s4hana-with-red-hat-openshift-on-ibm-power-systems-virtual-server)
 
