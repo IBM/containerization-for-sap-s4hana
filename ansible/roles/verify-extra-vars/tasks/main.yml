@@ -1,0 +1,100 @@
+---
+# ------------------------------------------------------------------------
+# Copyright 2022 IBM Corp. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ------------------------------------------------------------------------
+
+- set_fact:
+     invalid_parms: []
+     parms_valid: True
+     vars_must_not_be_empty:
+         - key: path_to_ocp_tool
+           value: "{{ path_to_ocp_tool }}"
+         - key: passphrase
+           value: "{{ passphrase }}"
+         - key: ocp_cluster_domain
+           value: "{{ ocp_cluster_domain }}"
+         - key: ocp_admin_name
+           value: "{{ ocp_admin_name }}"
+         - key: ocp_admin_password
+           value: "{{ ocp_admin_password }}"
+         - key: ocp_user_name
+           value: "{{ ocp_user_name }}"
+         - key: ocp_user_password
+           value: "{{ ocp_user_password }}"
+         - key: ocp_project_name
+           value: "{{ ocp_project_name }}"
+         - key: ocp_helper_node
+           value: "{{ ocp_helper_node }}"
+         - key: ocp_helper_node_user_name
+           value: "{{ ocp_helper_node_user_name }}"
+         - key: nws4_host_name
+           value: "{{ nws4_host_name }}"
+         - key: nws4_sid
+           value: "{{ nws4_sid }}"
+         - key: nws4_sidadm_name
+           value: "{{ nws4_sidadm_name }}"
+         - key: nws4_sidadm_password
+           value: "{{ nws4_sidadm_password }}"
+         - key: hdb_sidadm_name
+           value: "{{ hdb_sidadm_name }}"
+         - key: hdb_sidadm_password
+           value: "{{ hdb_sidadm_password }}"
+         - key: containers_ascs_requests_memory
+           value: "{{ containers_ascs_requests_memory }}"
+         - key: containers_ascs_limits_memory
+           value: "{{ containers_ascs_limits_memory }}"
+         - key: nfs_path_to_hdb_copy
+           value: "{{ nfs_path_to_hdb_copy }}"
+         - key: nfs_path_to_overlay
+           value: "{{ nfs_path_to_overlay }}"
+
+- name: Verifying required parameter values
+  vars:
+     invalid_parm: "{{ item.key }}"
+  set_fact:
+     invalid_parms: "{{ invalid_parms + [invalid_parm] }}"
+     parms_valid: False
+  when:
+     item.value == None or item.value == ""
+  loop: "{{ vars_must_not_be_empty }}"
+  no_log: True
+
+- debug:
+     msg: "Missing or empty value for parameter '{{ item }}'"
+  with_items:
+     "{{ invalid_parms }}"
+  when:
+     invalid_parms|length > 0
+ 
+###### Checking sidadm and sid
+- name: Verifying that <nws4_sid> and <nws4_sidadm_name> matches
+  debug:
+     msg: "{{ nws4_sid }} and {{ nws4_sidadm_name }} do not match."
+  when:
+     nws4_sid|lower not in nws4_sidadm_name
+
+- set_fact:
+     parms_valid: False
+  when:
+     nws4_sid|lower not in nws4_sidadm_name
+
+
+###### Checking files/directories?
+###### What else?
+
+- fail:
+     msg: "Error(s) in parameter file. See above messages for more information."
+  when:
+     not parms_valid

@@ -16,15 +16,15 @@
 # ------------------------------------------------------------------------
 
 # check NFS server connections
-- name: show status of NFS user name and OCP helper node
+- name: Verifying NFS user name and OCP helper node
   fail:
     msg: "NFS user name and OCP helper node must be defined"
   when: ocp_helper_node == '' and nfs_user_name == ''
 
-- name: check ssh connection to NFS server {{ nfs_user_name }}@{{ nfs_host_name }}
+- name: Checking ssh connection to NFS server {{ nfs_user_name }}@{{ nfs_host_name }}
   shell: "ssh -o StrictHostKeyChecking=no {{ nfs_user_name }}@{{ nfs_host_name }} ls"
   when: nfs_host_name !=''
 
-- name: check ssh connection to NFS server on a helper node {{ nfs_user_name }}@{{ ocp_helper_node }}
+- name: Checking ssh connection to NFS server on a helper node {{ nfs_user_name }}@{{ ocp_helper_node }}
   shell: "ssh -o StrictHostKeyChecking=no {{ ocp_helper_node_user_name }}@{{ ocp_helper_node }} ls"
   when: nfs_host_name == ''

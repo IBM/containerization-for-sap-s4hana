@@ -14,13 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- hosts: all
-  roles:
-  - verify-extra-vars
-  - os-prerequisites
-  - ocp-prerequisites
-  - copy-hdb-nfs
-  - build-images
-  - push-images
-  - create-overlay-share
-  - deploy-images
+- name: Pushing "{{ flavor }}" image to ocp cluster
+  set_fact:
+    tool_name: "image-push"
+    arguments: "-f {{ flavor }} -w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- name: Showing result after pushing {{ flavor }} image
+  debug:
+    var: tool_out.stdout

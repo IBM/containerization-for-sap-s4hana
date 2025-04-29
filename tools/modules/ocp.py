@@ -173,7 +173,7 @@ class Ocp():
         if not out.startswith('Login Succeeded!'):
             fail('podman login failed')
 
-    def containerRun(self, containerName, command, rcOk=(0,)):
+    def containerRun(self, containerName, command, rcOk=(0,), ignoreError=True):
         """ Run a command in a running container of given flavor """
 
         logging.debug(f'rcOk >>>{rcOk}<<<')
@@ -185,7 +185,7 @@ class Ocp():
 
         else:
             ocCmd = self._buildOcExecCmd(podName, containerName, command)
-            res = CmdShell().run(ocCmd, rcOk=rcOk)
+            res = CmdShell().run(ocCmd, rcOk=rcOk, ignoreError=ignoreError)
         return res
 
     def getContainerName(self, containerFlavor):
@@ -269,13 +269,13 @@ class Ocp():
             return False
         return True
 
-    def ocApply(self, file, printRunTime=False):
+    def ocApply(self, file, printRunTime=False, ignoreError=True):
         """ Apply a configuration to a resource """
 
         cmd = f"oc apply -f {file}"
         if printRunTime:
             cmd = "time " + cmd
-        res = CmdShell().run(cmd)
+        res = CmdShell().run(cmd, ignoreError=ignoreError)
 
         if res.rc == 0:
             logging.debug(f"Configuration file {file} successfully applied")

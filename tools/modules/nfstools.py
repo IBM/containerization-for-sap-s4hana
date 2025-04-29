@@ -153,25 +153,25 @@ class Overlay():
 
         for subDir in getHdbSubDirs(ctx):
             ovld = getOverlayDirs(ctx, subDir.path, overlayUuid)
-            cmdSsh.run(f'mkdir -p "{ovld.upper}" "{ovld.work}" "{ovld.merged}"')
+            cmdSsh.run(f'mkdir -p "{ovld.upper}" "{ovld.work}" "{ovld.merged}"', ignoreError=False)
 
             # Add to /etc/fstab for automatic mount after reboot
             # use noauto,x-systemd.automount to mount via systemd and automount
 
             fstabOpts = f'noauto,x-systemd.automount,{",".join(nfsOpts)},'
             fstabOpts += f'lowerdir={ovld.lower},upperdir={ovld.upper},workdir={ovld.work}'
-            cmdSsh.run(f'echo "overlay {ovld.merged} overlay {fstabOpts} 0 0" >> /etc/fstab')
+            cmdSsh.run(f'echo "overlay {ovld.merged} overlay {fstabOpts} 0 0" >> /etc/fstab', ignoreError=False)
 
             mountCmd = f'mount {ovld.merged}'
 
-            cmdSsh.run(mountCmd)
+            cmdSsh.run(mountCmd, ignoreError=False)
 
             # Need to make the file systems unique - otherwise rpc.mountd
             # will always offer the first mounted file system.
 
             exportOpts = exportOptsGeneric + f',fsid={uuid.uuid1()}'
 
-            cmdSsh.run(f'echo "{ovld.merged} *({exportOpts})" >> /etc/exports')
+            cmdSsh.run(f'echo "{ovld.merged} *({exportOpts})" >> /etc/exports', ignoreError=False)
 
         # Create the persistence directories
 
@@ -191,11 +191,11 @@ class Overlay():
                    f' "{persistenceDirHdb}"')
         cmdSsh.run(f'chmod 755 "{persistenceDirHdb}"')
 
-        cmdSsh.run(f'echo "{persistenceDir} *({exportOptsGeneric})" >> /etc/exports')
+        cmdSsh.run(f'echo "{persistenceDir} *({exportOptsGeneric})" >> /etc/exports', ignoreError=False)
 
         # Export the overlay and persistence file systems
 
-        cmdSsh.run('exportfs -ar')
+        cmdSsh.run('exportfs -ar', ignoreError=False)
 
         # Return the uuid of the created file systems
 

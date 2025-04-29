@@ -154,10 +154,9 @@ class Deploy():
         try:
             # pylint: disable=unspecified-encoding
             with open(deployment.file, 'w') as oFh:
-                print(yaml.dump(serviceYamlPart), file=oFh, end='')
+                print(yaml.dump(serviceYamlPart, default_style='"'), file=oFh, end='')
                 print('---', file=oFh)
-                print(yaml.dump(deploymentYamlPart), file=oFh, end='')
-
+                print(yaml.dump(deploymentYamlPart, default_style='"'), file=oFh, end='')
             print(deployment.file)
 
         except IOError:

@@ -296,13 +296,13 @@ class Builder():
         # pylint: disable=unused-argument
         fail('This function must be overwritten by derived flavor specific builder class.')
 
-    def _buildImage(self, buildCmd, dirs, image, containerfile):
+    def _buildImage(self, buildCmd, dirs, image, containerfile, ignoreError=False):
         # Build image
         # MUST RUN AFTER BUILD CONTEXT SETUP
         # pylint: disable=no-self-use
         logging.info("##### Building image #####")
         with pushd(dirs.build):
-            self._cmdShell.run(f'{buildCmd} build -t {image.tag} -f "{containerfile}" .')
+            self._cmdShell.run(f'{buildCmd} build -t {image.tag} --network host -f "{containerfile}" .', ignoreError=ignoreError)
 
     def _getOptionalPackageParams(self, packages, dirs):
         # Check if optional packages must be installed
@@ -524,10 +524,12 @@ class BuilderHdb(Builder):
                            f'{dirs.build}{dirs.defaultPackagesDir}')
 
         with pushd(dirs.build):
-            self._remoteCopy.copy(dirs.hanaSharedSid, filterFilePath)
-            self._remoteCopy.copy('/etc/sysctl.conf', filterFilePath)
-            self._remoteCopy.copy('/etc/pam.d/sapstartsrv', filterFilePath)
-            self._remoteCopy.copy('/etc/security/limits.d/99-sapsys.conf', filterFilePath)
+            # self._cmdShell.run(f"mkdir -p .{dirs.usrSapReal}")
+            print(self._cmdShell.run("rsync --version").out)
+            self._remoteCopy.copy(dirs.hanaSharedSid, filterFilePath, verbose=1)
+            self._remoteCopy.copy('/etc/sysctl.conf', filterFilePath, verbose=1)
+            self._remoteCopy.copy('/etc/pam.d/sapstartsrv', filterFilePath, verbose=1)
+            self._remoteCopy.copy('/etc/security/limits.d/99-sapsys.conf', filterFilePath, verbose=1)
             # pylint: disable=invalid-name, unspecified-encoding
             with open(f'.{dirs.usrSapReal}/sapservices', 'w') as fh:
                 print(self._cmdSsh.run(f'grep {sidU} /usr/sap/sapservices').out, file=fh)

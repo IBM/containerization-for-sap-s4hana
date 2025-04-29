@@ -15,65 +15,58 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 
-# check if oc tool is installed and copy it from helper node if not installed
+# Checking if oc tool is installed and copy it from helper node if not installed
 - import_tasks: check_oc_tool.yml
 
-# check temp directory for image builds
-- name: create temp directory for image builds
+# Creating temp directory for image builds
+- name: Creating temp directory for image builds
   file:
     path: "{{ tmp_root }}"
     state: directory
 
-# verify connection to  NFS server and create directories for HDB copy
-- import_tasks: verify_nfs_server.yml
- 
-# verify NFS directories on NFS server for HDB copy and overlay share
-- import_tasks: verify_nfs_hdb_directories.yml
-  
-# install all required libraries
-- name: install podman
+# Installing all required packages
+- name: Installing packages
+  vars:
+    package_list:
+       - podman
+       - git
+       - python3
+       - python3-devel
+       - python3-pip
+    state: "present"
   package:
-    name: podman
-    state: "{{ package_state }}"
-- name: install a "{{ package_state }}" version of git
-  package:
-    name: git
-    state: "{{ package_state }}"
-- name: install {{ python3x_version }}
-  package:
-    name: "{{ python3x_version }}"
-    state: "{{ package_state }}"  
-- name: install "{{ python3x_version }}-devel"
-  package:
-    name: "{{ python3x_version }}-devel"
-    state: "{{ package_state }}"
-- name: install "{{ python3x_version }}-pip"
-  package:
-    name: "{{ python3x_version }}-pip"
-    state: "{{ package_state }}"
+    name: "{{ item }}"
+    state: "{{ state }}"
+  with_items:
+    "{{ package_list }}"
 
-- name: set up a Python virtual environment with all Python modules
+- name: Setting up the Python virtual environment with all Python modules
   shell: "cd {{ path_to_ocp_tool }} && ./tools/venv-setup "
   register: outmsg
   ignore_errors: true
 - debug: var=outmsg.stdout_lines
-- name: show debug message if the venv setup doesn't work
+- name: Showing error message in case of failure
   debug: var=outmsg.stderr_lines
   failed_when: outmsg.rc != 0
   when: outmsg.rc != 0
   
-- name: activate virtual environment
+- name: Activating the virtual environment
   shell: "source {{ path_to_ocp_tool }}/venv/bin/activate"
   register: outmsg
 - debug: var=outmsg
 
-# generate config.yml and verify its parameters
+# Generating config.yaml and creds.yaml and verify its parameters
 - import_tasks: gen-config-creds.yml
 
-- name: add cluster ip to /etc/hosts
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-etc-hosts -c ./config.yaml -q ./creds.yaml -w"
-  register: outmsg
-- debug: var=outmsg
+# Verifying connection to  NFS server
+- import_tasks: verify_nfs_server.yml
+ 
+- name: Adding the cluster ip to /etc/hosts
+  set_fact:
+    tool_name: "ocp-etc-hosts"
+    arguments: "-w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out
 
-# check connection to OCP4 cluster
+# Checking the connection to OCP4 cluster
 - import_tasks: check_connection_to_ocp4_cluster.yml

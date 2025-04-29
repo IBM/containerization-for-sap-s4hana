@@ -14,8 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: create a snapshot copy of the SAP HANA on the NFS server
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/nfs-hdb-copy -c ./config.yaml -q ./creds.yaml -w"
-  register: outmsg
+- name: Creating a snapshot copy of SAP HANA DB on NFS server
+  set_fact: 
+    tool_name: "nfs-hdb-copy"
+    arguments: "-w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
 - name: show status of copy hdb 
-  debug: var=outmsg.stdout
+  debug: var=tool_out.stdout

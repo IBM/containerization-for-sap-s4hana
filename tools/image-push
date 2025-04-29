@@ -56,7 +56,7 @@ def _getArgs():
 
 def _tagImage(ctx, flavor):
     names = getattr(ctx.cf.images, flavor).names
-    CmdShell().run(f'podman tag {names.local} {names.ocp}')
+    CmdShell().run(f'podman tag {names.local} {names.ocp}', ignoreError=False)
 
 
 def _pushImage(ctx, flavor):
@@ -64,7 +64,7 @@ def _pushImage(ctx, flavor):
     cmd = 'podman push'
     cmd += ' --tls-verify=false'
     cmd += f' {names.ocp}'
-    CmdShell().run(cmd)
+    CmdShell().run(cmd, ignoreError=False)
 
 
 # ----------------------------------------------------------------------

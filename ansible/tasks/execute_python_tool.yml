@@ -14,13 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- hosts: all
-  roles:
-  - verify-extra-vars
-  - os-prerequisites
-  - ocp-prerequisites
-  - copy-hdb-nfs
-  - build-images
-  - push-images
-  - create-overlay-share
-  - deploy-images
+- name: Start tools/{{ tool_name }} with arguments {{ arguments }}
+  environment:
+     SOOS_CREDS_PASSPHRASE: "{{ passphrase }}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/{{ tool_name }} -c ./config.yaml -q ./creds.yaml.gpg -v {{ debug_level_ocp_tool }} {{ arguments }}"
+  register: msg
+- set_fact:
+     tool_out: "{{ msg }}"
+- name: set return values
+  shell: "ls -rtl {{ path_to_ocp_tool }}/log | grep {{ tool_name }} | tail -n 1"
+  register: out_msg
+- set_fact:
+     filename: "{{ out_msg.stdout.split(' ')[-1] }}"

@@ -14,13 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- hosts: all
-  roles:
-  - verify-extra-vars
-  - os-prerequisites
-  - ocp-prerequisites
-  - copy-hdb-nfs
-  - build-images
-  - push-images
-  - create-overlay-share
-  - deploy-images
+- include_vars: context.yaml
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/oc-user-login.yml"
+- name: Getting image list from OCP Cluster Registry
+  command: oc get imagestream 
+  register: out_image_stream
+- set_fact:
+     out_lines: "{{ out_image_stream.stdout_lines }}"
+     image_names: []
+- set_fact:
+     image_names: "{{ image_names + [item.split(' ')[0]]  }}"
+  with_items: "{{ out_lines }}"
+- fail:
+     msg: "Image {{ item.value.names.short }} missing in local OpenShift Cluster Registry"
+  when:
+     item.value.names.short not in image_names
+  with_dict: "{{ cf.images }}"

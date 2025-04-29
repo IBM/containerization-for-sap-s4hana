@@ -30,7 +30,8 @@ from modules.times      import (
     saveEndTime,
     saveStartTime
 )
-
+from modules.command    import CmdShell
+from modules.fail       import fail
 
 # Functions
 
@@ -49,6 +50,11 @@ def startup(mainFunc):
     # Run the program
 
     retCode = mainFunc()
+
+    # check exit RC from CmdShell
+
+    if CmdShell.getToolExitRC() != 0:
+        fail(CmdShell.getToolExitErr(), exitCode = CmdShell.getToolExitRC())
 
     # Save the program termination time
 

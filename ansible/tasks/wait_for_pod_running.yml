@@ -15,7 +15,9 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 - name: verify pod status every 30 seconds and maximum 30 minutes or until stdout contains string "Running"
-  shell: "cd {{path_to_ocp_tool}} && source {{path_to_ocp_tool}}/venv/bin/activate && {{path_to_ocp_tool}}/tools/ocp-pod-status -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml"
+  environment:
+     SOOS_CREDS_PASSPHRASE: "{{ passphrase }}"
+  shell: "cd {{path_to_ocp_tool}} && source {{path_to_ocp_tool}}/venv/bin/activate && {{path_to_ocp_tool}}/tools/ocp-pod-status -c {{path_to_ocp_tool}}/config.yaml -q {{path_to_ocp_tool}}/creds.yaml.gpg"
   register: outmsg
   ignore_errors: yes
   until: outmsg.stdout.find("Running") != -1

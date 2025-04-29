@@ -86,7 +86,7 @@ echo "Checking / installing required RPM packages"
 echo
 
 PKG_REQ=""
-PKG_REQ="${PKG_REQ} python38"
+#PKG_REQ="${PKG_REQ} python3"
 
 PKG_INST=""
 
@@ -117,7 +117,7 @@ echo
 echo "Setting up virtual environment"
 echo
 
-PYTHON="/usr/bin/env python3.8"
+PYTHON="/usr/bin/env python3.9"
 VENV="$(pwd)/venv"
 
 ${PYTHON} -m venv "${VENV}"

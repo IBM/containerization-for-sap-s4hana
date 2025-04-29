@@ -29,17 +29,8 @@ debug_level_ocp_tool: warning
 # Directory under which the build contexts for image build are assembled
 tmp_root: /data/tmp
 
-# installs packages with ansible package module and state present
-package_state: present
-
-# install python3 or higher version
-python3x_version: python3
-
-# generate config file for automatic tools script execution with template config.j2.template
-template_config_file: config.j2.template
-
-# generate credentials file for automatic tools script execution with template creds.j2.template
-template_creds_file: creds.j2.template
+# passphrase for encoding creds.yaml file; must not be empty!
+passphrase: ''
 
 # Absolute path to the private SSH ID file which is used for SSH connect operations 
 # from the build machine to remote systems, optional

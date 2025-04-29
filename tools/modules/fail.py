@@ -29,7 +29,7 @@ from modules.times import (
     saveCurrentTime,
     printTimes
 )
-
+from modules.logger import getScriptName
 
 # Functions
 
@@ -40,6 +40,10 @@ def fail(msg, exitCode=1):
 
     saveCurrentTime('Failure')
     printTimes()
+
+    tool_name = getScriptName()
+    logging.error(f"{tool_name}: error return code: {exitCode}")
+    # print(f"{tool_name}: error return code: {exitCode}", file=sys.stderr)
 
     sys.exit(exitCode)
 

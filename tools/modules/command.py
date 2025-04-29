@@ -48,6 +48,7 @@ class Command():
 
         logging.debug(f'rcOk >>>{rcOk}<<<')
 
+        # log stdout and stderr if level set to debug or cmd failed
         if rc not in rcOk:
             logFunc = logging.error
         else:
@@ -56,7 +57,14 @@ class Command():
         logFunc('Result of command execution:')
         logFunc('# stdout: ' + (f'>>>\n{out}\n<<<' if out.strip() else '<empty>'))
         logFunc('# stderr: ' + (f'>>>\n{err}\n<<<' if err.strip() else '<empty>'))
-        logFunc(f'# rc: {rc}')
+
+        # log return code if level set to info or debug or cmd failed
+        if rc not in rcOk and logging.getLogger().getEffectiveLevel() > 20:
+            logFunc = logging.error
+        else:
+            logFunc = logging.info
+
+        logFunc(f'Command rc: {rc}')
 
         return types.SimpleNamespace(**{
             'out': out,
@@ -88,13 +96,10 @@ class Command():
     def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False):
         """ Execute a command """
 
-        logCmd = Command._instantiateSecrets(cmd, secrets, hide=True)
-        logging.debug(f"Executing command >>>\n{logCmd}\n<<<")
-
         result = None
 
         if dryRun:
-            logging.info('dry run - not executing')
+            logging.warning('dry run - not executing')
             result = Command.buildResult('', '', 0, rcOk)
 
         return result
@@ -103,16 +108,42 @@ class Command():
 class CmdShell(Command):
     """ Execute a local shell command """
 
+    _failOnError = False
+    _toolExitRC = 0
+    _toolExitErr = ''
+
+    @staticmethod
+    def setFailOnError():
+        """ Set fail on error """
+
+        CmdShell._failOnError = True
+
+    @staticmethod
+    def getToolExitRC():
+        """ Get RC to be used for tool exit """
+
+        return CmdShell._toolExitRC
+
+    @staticmethod
+    def getToolExitErr():
+        """ Get STDERR to be used for tool exit """
+
+        return CmdShell._toolExitErr
+
     def __init__(self):
         # pylint: disable=useless-super-delegation
         super().__init__()
 
-    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False):
+    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False, ignoreError=True):
         """ Execute a local shell command """
 
         result = super().run(cmd, secrets=secrets, rcOk=rcOk, dryRun=dryRun)
 
-        if not result:
+        if not dryRun:
+
+            logCmd = Command._instantiateSecrets(cmd, secrets, hide=True)
+            # log cmd string if level set to info or debug
+            logging.info(f"Executing command >>>\n{logCmd}\n<<<")
 
             runCmd = Command._instantiateSecrets(cmd, secrets, hide=False)
 
@@ -122,7 +153,17 @@ class CmdShell(Command):
             err   = cProc.stderr.decode().strip()
             rcode = cProc.returncode
 
+            # log cmd string now if cmd faild and level set to error or warning
+            if rcode not in rcOk and logging.getLogger().getEffectiveLevel() > 20:
+                logging.error(f"Executing command >>>\n{logCmd}\n<<<")
+
             result = Command.buildResult(out, err, rcode, rcOk)
+
+            if (not ignoreError or CmdShell._failOnError) and CmdShell._toolExitRC == 0 and rcode != 0:
+               
+                # save STDERR and RC for later exit
+                CmdShell._toolExitErr = err
+                CmdShell._toolExitRC = rcode
 
         return result
 
@@ -256,7 +297,7 @@ class CmdSsh(Command):
         msg = '-'*width+f'\n{msg}\n'+'-'*width+'\n'
         return msg
 
-    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False):
+    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False, ignoreError=True):
         """ Execute a command on a remote host using SSH """
         if secrets:
             cmd = Command._shiftSecrets(cmd, secrets, len(self._sshCmdSecrets))
@@ -266,7 +307,7 @@ class CmdSsh(Command):
         cmd     = f"{self._sshCmd} {self._sshLogin} '{cmd}'"
         secrets = self._sshCmdSecrets + secrets
 
-        return  self._cmdShell.run(cmd, secrets, rcOk, dryRun)
+        return  self._cmdShell.run(cmd, secrets, rcOk, dryRun, ignoreError)
 
     def getSshCmdAndSecrets(self, withLogin=True):
         """ Get SSH command which is executed by this instance """

@@ -89,7 +89,7 @@ def _main():
     if ctx.ar.image_flavor == 'init':
         with pushd(f'{ctx.cf.build.repo.root}/openshift/images/init'):
             imageName = ctx.cf.images.init.names.local
-            CmdShell().run(f'podman build -t {imageName} -f ./containerfile ./image-content')
+            CmdShell().run(f'podman build --network host -t {imageName} -f ./containerfile ./image-content', ignoreError=False)
     else:
         sidU = getattr(ctx.cf.refsys, ctx.ar.image_flavor).sidU
         host = getattr(ctx.cf.refsys, ctx.ar.image_flavor).host.name
