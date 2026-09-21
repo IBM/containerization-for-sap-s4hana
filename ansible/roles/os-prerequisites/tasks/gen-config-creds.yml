@@ -14,20 +14,64 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: generate config.yaml
-  template:
-#source directory of config.j2.template
-    src: "{{ template_config_file }}"
-    dest: "{{ path_to_ocp_tool }}/config.yaml"
-  register: out_msg
-- name: show result
-  debug: var=out_msg
+- name: Generating encoded creds.yaml
+  environment:
+    SOOS_CREDS_PASSPHRASE: "{{ passphrase }}"
+    SOOS_CREDS_BUILD_USER_SSHID: "{{ build_user_sshid }}"
+    SOOS_CREDS_REFSYS_NWS4_SIDADM_NAME: "{{ nws4_sidadm_name }}"
+    SOOS_CREDS_REFSYS_NWS4_SIDADM_PASSWORD: "{{ nws4_sidadm_password }}"
+    SOOS_CREDS_REFSYS_NWS4_HDBCONNECT_NAME: "{{ nws4_hdbconnect_name }}"
+    SOOS_CREDS_REFSYS_NWS4_HDBCONNECT_PASWORD: "{{ nws4_hdbconnect_password }}"
+    SOOS_CREDS_REFSYS_HDB_SIDADM_NAME: "{{ hdb_sidadm_name }}"
+    SOOS_CREDS_REFSYS_HDB_SIDADM_PASSWORD: "{{ hdb_sidadm_password }}"
+    SOOS_CREDS_NFS_USER_NAME: "{{ nfs_user_name }}"
+    SOOS_CREDS_NFS_USER_PASSWORD: "{{ nfs_user_password }}"
+    SOOS_CREDS_NFS_USER_SSHID: "{{ nfs_user_sshid }}"
+    SOOS_CREDS_OCP_USER_NAME: "{{ ocp_user_name }}"
+    SOOS_CREDS_OCP_USER_PASSWORD: "{{ ocp_user_password }}"
+    SOOS_CREDS_OCP_ADMIN_NAME: "{{ ocp_admin_name }}"
+    SOOS_CREDS_OCP_ADMIN_PASSWORD: "{{ ocp_admin_password }}"
+    SOOS_CREDS_OCP_HELPER_USER_NAME: "{{ ocp_helper_node_user_name }}"
+    SOOS_CREDS_OCP_HELPER_USER_PASSWORD: "{{ ocp_helper_node_user_password }}"
+    SOOS_CREDS_OCP_HELPER_USER_SSHID: "{{ ocp_helper_node_user_sshid }}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/creds -n --non-interactive -v debug -w"
+  register: outmsg
 
-- name: generate creds.yaml
-  template:
-#source directory of creds.j2.template
-    src: "{{ template_creds_file }}"
-    dest: "{{ path_to_ocp_tool }}/creds.yaml"
-  register: out_msg
-- name: show result
-  debug: var=out_msg
+- name: Checking file generation
+  fail:
+    msg: "Could not generate creds.yaml file."
+  when: outmsg.rc != 0
+
+- name: Generating config.yaml
+  environment:
+    SOOS_CREDS_PASSPHRASE: "{{ passphrase }}"
+    SOOS_CONFIG_BUILD_REPO_ROOT: "{{ path_to_ocp_tool }}"
+    SOOS_CONFIG_REFSYS_NWS4_SID: "{{ nws4_sid }}"
+    SOOS_CONFIG_REFSYS_NWS4_HOST_NAME: "{{ nws4_host_name }}"
+    SOOS_CONFIG_OCP_PROJECT: "{{ ocp_project_name }}"
+    SOOS_CONFIG_OCP_DOMAIN: "{{ ocp_cluster_domain }}"
+    SOOS_CONFIG_OCP_HELPER_HOST_NAME: "{{ ocp_helper_node }}"
+    SOOS_CONFIG_OCP_CONTAINERS_DI_SECRECT: "{{ containers_di_secret }}"
+    SOOS_CONFIG_OCP_CONTAINERS_DI_RESOURCES_REQUESTS_MEMORY: "{{ containers_di_requests_memory }}"
+    SOOS_CONFIG_OCP_CONTAINERS_DI_RESOURCES_LIMITS_MEMORY: "{{ containers_di_limits_memory }}"
+    SOOS_CONFIG_OCP_CONTAINERS_ASCS_RESOURCES_REQUESTS_MEMORY: "{{ containers_ascs_requests_memory }}"
+    SOOS_CONFIG_OCP_CONTAINERS_ASCS_RESOURCES_LIMITS_MEMORY: "{{ containers_ascs_limits_memory }}"
+    SOOS_CONFIG_OCP_CONTAINERS_HDB_RESOURCES_REQUESTS_MEMORY: "{{ containers_hdb_requests_memory }}"
+    SOOS_CONFIG_OCP_CONTAINERS_HDB_RESOURCES_LIMITS_MEMORY: "{{ containers_hdb_limits_memory }}"
+    SOOS_CONFIG_NFS_HOST_NAME: "{{ nfs_host_name }}"
+    SOOS_CONFIG_NFS_BASES_COPY: "{{ nfs_path_to_hdb_copy }}"
+    SOOS_CONFIG_NFS_BASES_OVERLAY: "{{ nfs_path_to_overlay }}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/config -n --non-interactive -v debug -q ./creds.yaml.gpg"
+  register: outmsg
+
+- name: Checking file generation
+  fail:
+    msg: "Could not generate config.yaml file."
+  when: outmsg.rc != 0
+
+#generate context.yaml file
+- name: Generating context for discovered parameters
+  environment:
+    SOOS_CREDS_PASSPHRASE: "{{ passphrase }}"
+  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/containerize --dump-context -c ./config.yaml -w > {{ path_to_ocp_tool }}/ansible/vars/context.yaml"
+  register: outmsg

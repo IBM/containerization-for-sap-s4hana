@@ -16,7 +16,9 @@
 # ------------------------------------------------------------------------
 #oc login <cluster URL> -u <user-name> -p <password-name>
 - name: Login as admin to OCP cluster
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-login -c ./config.yaml -q ./creds.yaml -a -w"
-  register: login_adm
+  set_fact:
+    tool_name: "ocp-login"
+    arguments: "-a -w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
 - name: show login result info
-  debug: var=login_adm.stdout
+  debug: var=tool_out.stdout

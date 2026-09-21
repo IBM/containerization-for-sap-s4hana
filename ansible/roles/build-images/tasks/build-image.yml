@@ -14,13 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- hosts: all
-  roles:
-  - verify-extra-vars
-  - os-prerequisites
-  - ocp-prerequisites
-  - copy-hdb-nfs
-  - build-images
-  - push-images
-  - create-overlay-share
-  - deploy-images
+- name: Building "{{ flavor }}" container image
+  set_fact:
+     tool_name: "image-build"
+     arguments: "-f {{ flavor }} -t {{ tmp_root }}"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- name: cat result after building "{{ flavor }}" container image
+  shell: "cat {{path_to_ocp_tool}}/log/{{ filename }}"
+  register: logfile_out
+  ignore_errors: true
+- name: show stderr when rc!=0 after building "{{ flavor }}" container image
+  fail:
+    msg: "Building {{ flavor }} container image failed. See {{ path_to_ocp_tool}}/log/{{ filename }} for more information!"
+  when: tool_out.rc != 0
+- name: show result after building "{{ flavor }}" container image
+  debug:
+    var: logfile_out.stdout_lines

@@ -18,6 +18,7 @@
   pre_tasks:
   - import_tasks: tasks/copy-git-repo.yml
   roles:
+  - verify-extra-vars
   - os-prerequisites
   - ocp-prerequisites
   - copy-hdb-nfs

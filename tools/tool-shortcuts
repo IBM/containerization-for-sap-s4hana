@@ -19,6 +19,7 @@
 SCRIPT_PATH=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}")
 export SOOS_TOOLS_PATH=$(dirname $SCRIPT_PATH)
+export SOOS_TRACE_LEVEL=info
 
 if [[ $# == 1 && "$1" == "--add" ]]; then
   if [[ "$(grep -c $SCRIPT_NAME ~/.bashrc)" == "0" ]]; then
@@ -34,7 +35,7 @@ if [[ -d $SOOS_TOOLS_PATH/tools ]]; then
 fi
 for TOOL in $SOOS_TOOLS_LIST; do
 eval "function soos-$TOOL()
-{ export ARGS=\$@ && sh -c 'tool-shortcut $TOOL; exit \$?'
+{ ARGS=; for a in \"\$@\"; do if [[ "\$a" == *\" \"* ]]; then ARGS=\"\$ARGS '\${a}'\"; else ARGS=\"\$ARGS \${a}\"; fi; done; export ARGS && sh -c 'tool-shortcut $TOOL; exit \$?'
 }"
 export -f soos-$TOOL
 done
@@ -48,20 +49,28 @@ function tool-shortcut()
      echo "Error: Tool $SOOS_TOOLS_PATH/tools/$1 not found in dir $SOOS_TOOLS_PATH/tools, change environment variable SOOS_TOOLS_PATH." && return 1
    fi
    if [[ ! -r $SOOS_TOOLS_PATH/venv/bin/activate ]]; then
-     cd $SOOS_TOOLS_PATH && $SOOS_TOOLS_PATH/tools/venv-setup || return $?
+     cd $SOOS_TOOLS_PATH && $SOOS_TOOLS_PATH/tools/venv-setup -v $SOOS_TRACE_LEVEL || return $?
    fi
-   if [[ -r $SOOS_TOOLS_PATH/config.yaml ]]; then
+   if [[ "$ARGS" != *"-c"* ]]; then
+     if [[ -r $SOOS_TOOLS_PATH/config.yaml ]]; then
+       ARGS="$ARGS -c $SOOS_TOOLS_PATH/config.yaml"
+     else
+       echo "Error: Config file $SOOS_TOOLS_PATH/config.yaml not found, run tools/config first." && return 1
+     fi
+   fi
+   if [[ "$ARGS" != *"-q"* ]]; then
      if [[ -r $SOOS_TOOLS_PATH/creds.yaml ]]; then
-       cd $SOOS_TOOLS_PATH && source $SOOS_TOOLS_PATH/venv/bin/activate && \
-           $SOOS_TOOLS_PATH/tools/$1 $ARGS -c $SOOS_TOOLS_PATH/config.yaml -q $SOOS_TOOLS_PATH/creds.yaml || return $?
+       ARGS="$ARGS -q $SOOS_TOOLS_PATH/creds.yaml"
      elif [[ -r $SOOS_TOOLS_PATH/creds.yaml.gpg ]]; then
-       cd $SOOS_TOOLS_PATH && source $SOOS_TOOLS_PATH/venv/bin/activate && \
-           $SOOS_TOOLS_PATH/tools/$1 $ARGS -c $SOOS_TOOLS_PATH/config.yaml -q $SOOS_TOOLS_PATH/creds.yaml.gpg || return $?
+       ARGS="$ARGS -q $SOOS_TOOLS_PATH/creds.yaml.gpg"
      else
        echo "Error: Credential file $SOOS_TOOLS_PATH/creds.yaml or $SOOS_TOOLS_PATH/creds.yaml.gpg not found, run tools/creds first." && return 1
      fi
-   else
-     echo "Error: Config file $SOOS_TOOLS_PATH/config.yaml not found, run tools/config first." && return 1
    fi
+   if [[ "$ARGS" != *"-v"* ]]; then
+     ARGS="$ARGS -v $SOOS_TRACE_LEVEL"
+   fi
+   cd $SOOS_TOOLS_PATH && source $SOOS_TOOLS_PATH/venv/bin/activate && \
+     eval "$SOOS_TOOLS_PATH/tools/$1 $ARGS" || return $?
 }
 export -f tool-shortcut

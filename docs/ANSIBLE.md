@@ -63,19 +63,19 @@ Change working directory into the repository clone. This directory will be refer
 Directory `ansible/` of your repository clone contains the following components for building images:
 
 ``` shell
-  $ tree -L 1 ansible
   ansible
   ├── ...
   ├── ocp-deployment-ansible-tower.yml
   ├── ocp-deployment.yml
   ├── roles
-  │   ├── build-images
-  │   ├── copy-hdb-nfs
-  │   ├── create-overlay-share
-  │   ├── deploy-images
-  │   ├── ocp-prerequisites
-  │   ├── os-prerequisites
-  │   └── push-images
+  │   ├── build-images
+  │   ├── copy-hdb-nfs
+  │   ├── create-overlay-share
+  │   ├── deploy-images
+  │   ├── ocp-prerequisites
+  │   ├── os-prerequisites
+  │   ├── push-images
+  │   └── verify-extra-vars
   ├── tasks
   │   └── ...
   └── vars
@@ -87,11 +87,14 @@ are included in the playbook `ocp-deployment.yml`. The following roles
 are used to build images of your reference SAP HANA and SAP S/4HANA
 system:
 
+  + __verify-extra-vars__ checks if all required parameter values set in your `ocp-extra-vars.yml` parameter file.
+
   + __os-prerequisites__ installs packages like *podman*,
     *git*, *python3*, *python3-devel*. This role also
     verifies if the *oc* tool is installed and checks the connection
     to the NFS server and OCP cluster. It generates the configuration file
-    `config.yaml` and credentials file `creds.yaml` as well as secret for distributed SAP HANA and SAP S/4HANA systems.
+    `config.yaml` and credentials file `creds.yaml.gpg`.
+    In addition it creates the OCP secret for distributed reference SAP systems.
 
   + __ocp-prerequisites__ creates a new project on the Red
     Hat OpenShift Container Platform, sets up permissions and generates the
@@ -179,10 +182,12 @@ then add as mentioned previously `<your_rsa_key>` public-key to the `authorized_
 The file `vars/ocp-extra-vars.yml` in the `vars/` directory contains
 all required variables that are used in the playbooks. Some variables
 may contain sensitive information like IP addresses, passwords,
-usernames. As an option you can use the Ansible Vault utility to
-encrypt this sensitive content. See the [Red Hat Ansible
-documentation](https://docs.ansible.com/ansible/latest/user_guide/vault.html)
-for a details on how to set up Ansible Vault.
+and usernames. 
+> :warning: **We strongly recommend that you use the Ansible Vault utility 
+> to encrypt your Ansible parameter file.
+> See the [Red Hat Ansible
+> documentation](https://docs.ansible.com/ansible/latest/user_guide/vault.html)
+> on how to use Ansible Vault.**
 
 The file `vars/ocp-extra-vars.yml` looks as follows - replace all
 placeholders of type `<parameter>` with your own settings:
@@ -222,17 +227,8 @@ debug_level_ocp_tool: warning
 # Directory under which the build contexts for image build are assembled
 tmp_root: /data/tmp
 
-# installs packages with ansible package module and state present
-package_state: present
-
-# install python3 or higher version
-python3x_version: python3
-
-# generate config file for automatic tools script execution with template config.j2.template
-template_config_file: config.j2.template
-
-# generate credentials file for automatic tools script execution with template creds.j2.template
-template_creds_file: creds.j2.template
+# passphrase for encoding creds.yaml file; must not be empty!
+passphrase: ''
 
 # Absolute path to the private SSH ID file which is used for SSH connect operations 
 # from the build machine to remote systems, optional
@@ -268,13 +264,13 @@ ocp_helper_node: <ocp4_helper_node_name>
 # User on the OCP helper host which is used for accessing the helper host via SSH (needs root permissions)
 ocp_helper_node_user_name: <ocp4_helper_node_user_name>
 
-# User password to connect to the host of OCP helper node, optional; 
+# User password to connect to the host of OCP helper node, optional;
 # Specify '' if password-less access is configured
 ocp_helper_node_user_password: <ocp4_helper_node_user_password>
 
-# Absolute path to the private SSH ID file which is used for SSH connect operations 
+# Absolute path to the private SSH ID file which is used for SSH connect operations
 # from the OCP helper node to the OCP worker nodes, optional
-# If the value is '' then the configured user ssh settings from ~/.ssh/ are used 
+# If the value is '' then the configured user ssh settings from ~/.ssh/ are used
 ocp_helper_node_user_sshid: ''
 
 ###########################################
@@ -305,7 +301,7 @@ nws4_hdbconnect_name: SAPHANADB
 # specify '' if the reference system is a standard system
 nws4_hdbconnect_password: <HDB_connect_password>
 
-# SAP system ID of the original SAP HANA system to generate deployment file name, required 
+# SAP system ID of the original SAP HANA system to generate deployment file name, required
 hdb_sid_deployment: <HDB_sid_name>
 
 # SAP HANA database <sid>adm user name, required
@@ -315,15 +311,11 @@ hdb_sidadm_name: <HDB_sidadm_user_name>
 # Specify '' if password-less access is configured
 hdb_sidadm_password: <HDB_sidadm_password>
 
-# Requested memory for Dialog instance, optional; 
+# Requested memory for Dialog instance, optional;
 # Will be derived from the original instance if '' is specified
 containers_di_requests_memory: ''
 
-# Memory limit; must be >= requested memory, optional; 
-# Will be derived from the original instance if '' is specified
-containers_di_limits_memory: ''
-
-# Requested memory for ASCS instance, required 
+# Requested memory for ASCS instance, required
 containers_ascs_requests_memory: 10Gi
 
 # Memory limit; must be >= requested memory, required
@@ -351,14 +343,14 @@ containers_hdb_limits_memory: ''
 nfs_host_name: ''
 
 # User on nfs.host which is used for ssh and rsync operations (needs root permissions)
-# Password-less access for this user from build LPAR to NFS server must be configured, required 
+# Password-less access for this user from build LPAR to NFS server must be configured, required
 nfs_user_name: root
 
-# NFS user password, optional; 
+# NFS user password, optional;
 # Specify '' if password-less access is configured
 nfs_user_password: <NFS_user_password>
 
-# Path on nfs_host where directories {data,log} of the original HANA system are copied to, required 
+# Path on nfs_host where directories {data,log} of the original HANA system are copied to, required
 nfs_path_to_hdb_copy: <NFS_server_export_dir_for_hdb>
 
 # Path on nfs_host under which overlay file systems for container instances are created, required
@@ -423,7 +415,7 @@ you can also use the following two options to use the tools provided with this p
     is the absolute system path to parent directory of your current working directory `ansible` :
 
     ```shell
-    $ cd <path_to_ocp_tool> && source ./venv/bin/activate && ./tools/<tool_name> -q ./creds.yaml [tool_options]
+    $ cd <path_to_ocp_tool> && source ./venv/bin/activate && ./tools/<tool_name> [tool_options]
     ```
 
 2. Call the tools using the tool shortcuts.

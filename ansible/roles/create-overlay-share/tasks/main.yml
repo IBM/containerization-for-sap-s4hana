@@ -14,11 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: creating HANA DB overlay share on the NFS server
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/nfs-overlay-setup -c ./config.yaml -q ./creds.yaml"
-  register: uuid_status
-- debug: var=uuid_status.stdout
-- name: store uuid for the deployment file
+- name: Creating HANA DB overlay share on NFS server
+  set_fact:
+    tool_name: "nfs-overlay-setup"
+    arguments: ""
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out.stdout
+- name: Storing uuid and overlay-share name for the deployment file
   set_fact: 
-    overlay_share_name: "{{ uuid_status.stdout }}"
-    uuid_value: "{{ uuid_status.stdout.split('-') | last }}"
+    overlay_share_name: "{{ tool_out.stdout }}"
+    uuid_value: "{{ tool_out.stdout.split('-') | last }}"

@@ -14,26 +14,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
+# import vars from context.yaml file
+- include_vars: context.yaml
 
-- import_tasks: ../../../tasks/oc-user-login.yml
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/oc-user-login.yml"
   
-- name: "set oc_project: {{ ocp_project_name }}"
-  set_fact:
-    oc_project: "{{ ocp_project_name }}"
-- name: check if the project "{{ ocp_project_name }}" is already existing
+- set_fact:
+    oc_project: "{{ cf.ocp.project }}"
+- name: Checking if the project "{{ cf.ocp.project }}"exists already
   shell: "oc get projects" 
   register: oc_all_projects
 
-- name: create a new project if "{{ ocp_project_name }}" does not exist
-  shell: "oc new-project {{ocp_project_name}}"
+- name: Creating project "{{ cf.ocp.project }}" if it does not exist
+  shell: "oc new-project {{cf.ocp.project}}"
   register: outmsg
   when: oc_project not in oc_all_projects.stdout
 - name: show new-project
   debug: var=outmsg
 
-- name: choose your project
-  shell: "oc project {{ocp_project_name}}"
-- name: get service account
+- name: Setting the project
+  shell: "oc project {{cf.ocp.project}}"
+- name: Getting the service account
   shell: "oc get serviceaccount"
   register: outmsg
 - debug: var=outmsg.stdout
@@ -42,54 +43,59 @@
     msg: "outmsg.stderr"
   failed_when: outmsg.rc != 0
 
-- import_tasks: ../../../tasks/oc-admin-login.yml
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/oc-admin-login.yml"
   
-- name: enable the Image Registry default route, patch the Image Registry Operator
+- name: Enabling the Image Registry default route, patch the Image Registry Operator
   shell: "oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{\"spec\":{\"defaultRoute\":true}}'"
   register: r_msg
 - name: show Image Registry default route
   debug: var=r_msg
 
-- name: add permission
-  shell: "oc adm policy add-scc-to-group anyuid 'system:serviceaccounts:{{ocp_project_name}}'"
+- name: Adding permissions for ocp project
+  shell: "oc adm policy add-scc-to-group anyuid 'system:serviceaccounts:{{cf.ocp.project}}'"
   register: out_p
-- name: show permission settings
+- name: Showing permission settings
   debug: var=out_p.stdout
 
-- name: generate ocp service-account
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-service-account-gen -c ./config.yaml -q ./creds.yaml -o {{path_to_ocp_tool}}/{{ocp_project_name}}-service-account.yaml -w"
-  register: out_b
-- name: show output after generating oc service account  
-  debug: var=out_b.stdout
+- name: Generating the ocp service-account
+  set_fact:
+    tool_name: "ocp-service-account-gen"
+    arguments: "-o {{path_to_ocp_tool}}/{{cf.ocp.sa.file}} -w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- name: Showing result after service account generation
+  debug: var=tool_out.stdout
 
-- import_tasks: ../../../tasks/oc-admin-login.yml
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/oc-admin-login.yml"
 
-- name: add the required security context constraints to the service account
-  shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{ocp_project_name}}:{{ocp_project_name}}-sa"
+- name: Adding the required security context constraints to the service account
+  shell: "oc adm policy add-scc-to-user hostmount-anyuid system:serviceaccount:{{cf.ocp.project}}:{{cf.ocp.sa.name}}"
   register: out_msg
-- name: show result after add-scc-to-user
+- name: Showing result after add-scc-to-user
   debug: var=out_msg
   
 # generate secret for Distributed Reference System after OCP project is checked, created
-- import_tasks: generate_ocp_secret.yml
+- include_tasks: generate_ocp_secret.yml
+  when: cf.refsys.nws4.host.name != cf.refsys.hdb.host.name
 
-- name: verify configuration settings of config.yaml and creds.yaml
-  shell: "source {{path_to_ocp_tool}}/venv/bin/activate && {{ path_to_ocp_tool }}/tools/verify-config -c {{ path_to_ocp_tool }}/config.yaml -q {{ path_to_ocp_tool }}/creds.yaml -w"
-  register: result_msg
-  ignore_errors: true
-- debug: var=result_msg.stdout_lines
+- name: Verifying configuration settings of config.yaml and creds.yaml
+  set_fact:
+    tool_name: "verify-config"
+    arguments: "-w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out.stdout_lines
 - name: check missing verify configuration parameters
-  debug: var=result_msg.stderr_lines
-  failed_when: result_msg.rc != 0
-  when: result_msg.rc != 0
+  debug: var=tool_out.stderr_lines
+  failed_when: tool_out.rc != 0
+  when: tool_out.rc != 0
 
 # Checking security context constraints, checking worker nodes
-- name: verify ocp settings
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/verify-ocp-settings -c ./config.yaml -q ./creds.yaml -w"
-  register: outmsg
-  ignore_errors: true
-- debug: var=outmsg.stdout_lines
-- name: check missing verify ocp settings
-  debug: var=outmsg.stderr_lines
-  failed_when: outmsg.rc != 0
-  when: outmsg.rc != 0
+- name: Verifying ocp settings
+  set_fact:
+    tool_name: "verify-ocp-settings"
+    arguments: "-w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out.stdout_lines
+- name: Checking if ocp settings are correct
+  debug: var=tool_out.stderr_lines
+  failed_when: tool_out.rc != 0
+  when: tool_out.rc != 0

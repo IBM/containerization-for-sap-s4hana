@@ -33,7 +33,7 @@ def copyHdb(ctx):
     """ Copy snapshot of HANA DB to NFS server (automation option) """
     print(_genHeader1(f"Copying snapshot of HANA DB '{ctx.cf.refsys.hdb.sidU}'"
                       f" to NFS server '{ctx.cf.nfs.host.name}'"))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-hdb-copy'
+    cmd = f'{ctx.cf.build.repo.root}/tools/nfs-hdb-copy'
     cmd += ctx.ar.commonArgsStr
     _runCmd(cmd)
 
@@ -42,7 +42,7 @@ def buildImages(ctx):
     """ Build images for all flavors (automation option) """
     for flavor in ctx.config.getImageFlavors():
         print(_genHeader1(f"Building image for flavor '{flavor}'"))
-        cmd = f'time {ctx.cf.build.repo.root}/tools/image-build'
+        cmd = f'{ctx.cf.build.repo.root}/tools/image-build'
         cmd += f' -f {flavor}'
         cmd += ctx.ar.commonArgsStr
         _runCmd(cmd)
@@ -52,7 +52,7 @@ def pushImages(ctx):
     """ Push images for all flavors to OCP (automation option) """
     for flavor in ctx.config.getImageFlavors():
         print(_genHeader1(f"Pushing image for flavor '{flavor}'"))
-        cmd = f'time {ctx.cf.build.repo.root}/tools/image-push'
+        cmd = f'{ctx.cf.build.repo.root}/tools/image-push'
         cmd += f' -f {flavor}'
         cmd += ctx.ar.commonArgsStr
         _runCmd(cmd)
@@ -62,7 +62,7 @@ def setupOverlayShare(ctx, overlayUuid=None, out=True):
     """ Setup an overlay share on NFS server (automation option) """
     if out:
         print(_genHeader1('Setting up overlay share'))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-overlay-setup'
+    cmd = f'{ctx.cf.build.repo.root}/tools/nfs-overlay-setup'
     if overlayUuid:
         cmd += f' -u {overlayUuid}'
     cmd += ctx.ar.commonArgsStr
@@ -76,7 +76,7 @@ def createDeploymentFile(ctx, overlayUuid, out=True):
     """ Create deployment description file (automation option) """
     if out:
         print(_genHeader1('Creating deployment description file'))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/ocp-deployment'
+    cmd = f'{ctx.cf.build.repo.root}/tools/ocp-deployment'
     cmd += ' --gen-yaml'
     cmd += f' -u {overlayUuid}'
     cmd += ctx.ar.commonArgsStr
@@ -93,14 +93,14 @@ def startDeployment(ctx, deploymentFile=None, out=True):
     if not deploymentFile:
         deploymentFile = ctx.ar.deployment_file
     ocp = Ocp(ctx)
-    ocp.ocApply(deploymentFile, printRunTime=True)
+    ocp.ocApply(deploymentFile, printRunTime=False, ignoreError=False)
     del ocp
 
 
 def listOverlayShares(ctx):
     """ List all overlay shares on NFS server (manual option) """
     # print(_genHeader1('List of existing overlay shares:'))
-    cmd = f'time {ctx.cf.build.repo.root}/tools/nfs-overlay-list'
+    cmd = f'{ctx.cf.build.repo.root}/tools/nfs-overlay-list'
     cmd += ctx.ar.commonArgsStr
     return _runCmd(cmd).out
 
@@ -123,7 +123,7 @@ def stopDeployment(ctx, deploymentFile=None, out=True):
     if out:
         print(_genHeader1(f"Stopping deployment using file '{deploymentFile}'"))
     ocp = Ocp(ctx)
-    ocp.ocDelete(deploymentFile, printRunTime=True)
+    ocp.ocDelete(deploymentFile, printRunTime=False)
     del ocp
 
 # Private Methods
@@ -160,9 +160,8 @@ def _runCmd(cmd):
     result = CmdShell().run(cmd)
     if result.rc != 0:
         msg = ''
-        msg += f"Command '{cmd}' failed"
+        msg += f"Command '{cmd}' failed with rc: {result.rc}"
         msg += f'\n  stdout: >>>{result.out}<<<'
         msg += f'\n  stderr: >>>{result.err}<<<'
-        msg += f'\n  rc: {result.rc}'
         fail(msg)
     return result

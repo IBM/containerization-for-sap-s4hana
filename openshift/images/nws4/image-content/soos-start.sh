@@ -63,7 +63,7 @@ timedatectl set-timezone ${SOOS_GLOBAL_TIMEZONE} # requires running systemd
 
 echo "Copying services"
 
-grep $SOOS_NWS4_PROFILE /usr/sap/sapservices.orig > /usr/sap/sapservices
+grep -i $SOOS_NWS4_PROFILE /usr/sap/sapservices.orig > /usr/sap/sapservices
 
 # Copy executables to instance directories
 
@@ -71,9 +71,15 @@ echo "Copying executables to instance directories"
 
 while read line; do
   array=($line)
-  profile=${array[4]}
-  SYS_EXE_PATH=/usr/sap/$SOOS_NWS4_SID/SYS/exe/run
-  LD_LIBRARY_PATH=$SYS_EXE_PATH:$LD_LIBRARY_PATH; export LD_LIBRARY_PATH; $SYS_EXE_PATH/sapcpe $profile
+  for i in "${array[@]}"
+  do
+    if [[ $i == pf=* ]]
+    then
+      profile=$i
+      SYS_EXE_PATH=/usr/sap/$SOOS_NWS4_SID/SYS/exe/run
+      LD_LIBRARY_PATH=$SYS_EXE_PATH:$LD_LIBRARY_PATH; export LD_LIBRARY_PATH; $SYS_EXE_PATH/sapcpe $profile
+    fi
+  done
 done </usr/sap/sapservices
 
 PERSISTENCE=/persistence/${SOOS_NWS4_SID}

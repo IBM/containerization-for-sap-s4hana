@@ -60,6 +60,7 @@ class RemoteCopy():
     def _runRsync(self, source, filterFilePath, verbose, dryRun):
         logging.debug(f'source: >>>{source}<<<')
         cmdShell = CmdShell()
+        print('rsync version:\n', cmdShell.run('rsync --version').out)
         cmd = 'rsync -a --relative'
         cmd += f' -e "{self._rsyncSsh}"'
         if verbose > 0:
@@ -72,7 +73,7 @@ class RemoteCopy():
             cmdShell.run(cmd, self._rsyncSshSecrets)
         else:
             with tempfile.NamedTemporaryFile(mode='w') as tfh:
-                tfh.write("\n".join(str(fn) for fn in source))
+                tfh.write("\n".join(str(fn) for fn in source)+'\n')
                 tfh.flush()
                 logging.debug(f"Contents of file '{tfh.name}':")
                 logging.debug('>>>')
@@ -112,7 +113,7 @@ class RemoteCopy():
     def _symlinkConvertRelToAbs(self, symlink, linkTarget):
         if not linkTarget.startswith('/'):
             relTarget = linkTarget
-            linkTarget = os.path.join(os.path.dirname(symlink), linkTarget)[1:]  # skip leading '.'
+            linkTarget = os.path.normpath( os.path.join(os.path.dirname(symlink), linkTarget)[1:] )  # skip leading '.'
             logging.debug(f"Converted relative target '{relTarget}' "
                           f"to absolute target '{linkTarget}'")
         return linkTarget

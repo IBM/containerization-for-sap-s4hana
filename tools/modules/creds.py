@@ -109,7 +109,7 @@ class Creds(ConfigBase):
             else:
                 self._recipient = credsDec.key_id
 
-        logging.debug(f'self._recipient >>>{self._recipient}<<<')
+        logging.debug('GPG recipient resolved')
 
     def _readFile(self, fileName):
         """ Read credentials from possibly encrypted credentials file """

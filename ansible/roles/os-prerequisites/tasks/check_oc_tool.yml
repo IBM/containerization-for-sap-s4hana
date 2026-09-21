@@ -16,20 +16,20 @@
 # ------------------------------------------------------------------------
 
 # check if oc tool is installed and copy it from helper node if not installed
-- name: verify local oc tool
+- name: Verifying if oc tool exists already on build LPAR
   command: which oc
   ignore_errors: true
   register: outmsg
-- name: verify oc tool on the OCP4 helper node "{{ ocp_cluster_domain }}"
+- name: Verifying if oc tool exists on the OCP4 helper node "{{ ocp_cluster_domain }}"
   command: ssh -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }} "which oc"
   register: outmsg_helper
   ignore_errors: true
   when: outmsg.rc !=0
-- name: copy oc tool from OCP4 helper node to build LPAR
+- name: Copying oc tool from OCP4 helper node to build LPAR
   command: scp -o StrictHostKeyChecking=no root@api.{{ ocp_cluster_domain }}:{{ outmsg_helper.stdout }} {{ outmsg_helper.stdout }}
   register: outmsg_scp
   when: outmsg.rc != 0 and outmsg_helper is defined and outmsg_helper.rc == 0
-- name: check if oc tool is installed
+- name: Verifying if oc tool was installed
   debug: msg="{{ outmsg_scp.stderr }}"
   failed_when: outmsg_scp.rc != 0
   when: outmsg_scp.stderr is defined and outmsg_scp.rc != 0

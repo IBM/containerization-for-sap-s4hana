@@ -14,26 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: push INIT image into ocp cluster
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f init -w"
-  register: outmsg_init
-- name: show result after pushing INIT image
-  debug:
-    var: outmsg_init.stdout
-- name: push NWS4 image into ocp cluster
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f nws4 -w"
-  register: outmsg_nws4
-- name: show result after pushing NWS4 image
-  debug:
-    var: outmsg_nws4.stdout
-- name: push SAP HANA container image
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/image-push -c ./config.yaml -q ./creds.yaml -f hdb -w"
-  register: outmsg_hdb
-- name: show result after pushing SAP HANA container
-  debug:
-    var: outmsg_hdb.stdout
-- import_tasks: ../../../tasks/oc-user-login.yml
-- name: verify whether the images are available in the local registry of the OpenShift cluster
-  command: oc get imagestream
-  register: out_image_stream
-- debug: var=out_image_stream.stdout_lines
+- set_fact:
+     flavor: "init"    
+- import_tasks: ./push-image.yml
+- set_fact:
+     flavor: "nws4"    
+- import_tasks: ./push-image.yml
+- set_fact:
+     flavor: "hdb"    
+- import_tasks: ./push-image.yml
+- import_tasks: ./verify-images.yml

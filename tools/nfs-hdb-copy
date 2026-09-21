@@ -149,11 +149,13 @@ def _main():
         copyCmd = _getCopyCmd(cmdSshDb, cmdSshNfs, sourceDir, targetDir)
 
         print(f"Copying '{sourceDir}' to '{targetDir}' on host '{ctx.cf.nfs.host.name}'")
-        CmdShell().run(copyCmd)
+        CmdShell().run(copyCmd, ignoreError=False)
+
+        if CmdShell.getToolExitRC() != 0:
+            fail(CmdShell.getToolExitErr(), exitCode=CmdShell.getToolExitRC())
 
         if not _checkCopyStep(cmdSshDb, cmdSshNfs, sourceDir, targetDir):
-            print(f"Copying '{sourceDir}' to '{targetDir}' was not successful.")
-
+            fail(f"Copying '{sourceDir}' to '{targetDir}' was not successful.", exitCode=1)
 
 # ----------------------------------------------------------------------
 

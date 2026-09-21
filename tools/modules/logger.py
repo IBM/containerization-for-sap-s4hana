@@ -27,7 +27,7 @@ import time
 
 # Functions
 
-def _getScriptName():
+def getScriptName():
     scriptName = os.path.basename(sys.argv[0])
     if scriptName.endswith('.py'):
         scriptName = scriptName[:-3]
@@ -35,7 +35,7 @@ def _getScriptName():
 
 
 def _getLogFilePath(logfileDir, infix=''):
-    prefix = _getScriptName()
+    prefix = getScriptName()
     if len(infix) > 0:
         prefix += '-'+infix
     return f'{logfileDir}/{prefix}-{str(time.time()).replace(".","")}.log'

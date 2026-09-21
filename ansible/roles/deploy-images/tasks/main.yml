@@ -14,22 +14,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------
-- name: generating the deployment file using {{ overlay_share_name }}
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment --gen-yaml -c ./config.yaml -q ./creds.yaml -u {{ overlay_share_name }}"
-  register: outmsg
-- debug: var=outmsg.stdout
+- name: Generating the deployment file using {{ overlay_share_name }}
+  set_fact:
+    tool_name: "ocp-deployment"
+    arguments: "--gen-yaml -u {{ overlay_share_name }}"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out.stdout
 - set_fact: 
-    deployment_file: "soos-{{ nws4_sid | lower}}-{{ uuid_value }}-deployment.yaml" 
+    deployment_file: "{{ tool_out.stdout }}"
 # start deployment 
-- name: apply the deployment file {{ deployment_file }}
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-deployment --start -f ./{{ deployment_file }} -c ./config.yaml -q ./creds.yaml "
-- import_tasks: ../../../tasks/wait_for_pod_running.yml
-- name: show pod mem info
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/ocp-pod-meminfo -c ./config.yaml -q ./creds.yaml"
-  register: out_msg
-- debug: var=out_msg
-- import_tasks: ../../../tasks/wait_for_system_running.yml
-- name: show SAP system status
-  shell: "cd {{path_to_ocp_tool}} && source ./venv/bin/activate && ./tools/sap-system-status -c ./config.yaml -q ./creds.yaml -w"
-  register: outmsg
-- debug: var=outmsg.stdout
+- name: Starting the deployment using deployment definition file {{ deployment_file }}
+  set_fact:
+    tool_name: "ocp-deployment"
+    arguments: "--start -f ./{{ deployment_file }}"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/wait_for_pod_running.yml"
+- name: Showing the memory information of pod
+  set_fact:
+    tool_name: "ocp-pod-meminfo"
+    arguments: ""
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/wait_for_system_running.yml"
+- name: Showing the status of the SAP system running in the pod
+  set_fact:
+    tool_name: "sap-system-status"
+    arguments: "-w"
+- import_tasks: "{{ path_to_ocp_tool }}/ansible/tasks/execute_python_tool.yml"
+- debug: var=tool_out
