@@ -195,10 +195,10 @@ Creating the OVA image for the RHEL boot image follows the same approach, howeve
 
 #### Copying the image to the Cloud Object Storage
 
-Copy the OVA image to the COS bucket (here: located in **eu-de** ) using AWS CLI:
+Copy the OVA image to the COS bucket (here: located in **eu-de**, change sample bucket name: **amzn-s3-demo-&lt;soos-sample-bucket&gt;** ) using AWS CLI:
 
 ```bash
-# aws --endpoint-url https://s3.eu-de.cloud-object-storage.appdomain.cloud s3 cp rhcos-48-12102021.ova.gz s3://soos-de
+# aws --endpoint-url https://s3.eu-de.cloud-object-storage.appdomain.cloud s3 cp rhcos-48-12102021.ova.gz s3://amzn-s3-demo-<soos-sample-bucket>
 ```
 
 #### Importing the Image into IBM Power Systems Virtual Server
