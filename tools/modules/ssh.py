@@ -93,7 +93,7 @@ class _PublicKey():
 
             if len(items) < 2 or len(items) > 3:
                 # Invalid line - self.isKey will remain False
-                logging.warning(f'Encountered invalid public key line >>>\n{self.line}\n<<<')
+                logging.warning(f'Encountered invalid public key line (length: {len(self.line)} chars)')
 
             else:
                 self.algo = items[0]
@@ -190,7 +190,7 @@ class AuthorizedKeys():
 
         self._read(info)  # Sets self._authKeys
 
-        logging.debug(f'self._authKeys >>>\n{self._authKeys}\n<<< self._authKeys')
+        logging.debug(f'self._authKeys: {self._authKeys.numKeys()} key(s) loaded')
 
     def __str__(self):
         return str(self._authKeys)
@@ -277,7 +277,7 @@ def getPublicKey(ctx, hname, user):
 
     pubKeys = _PublicKeys(res.out, info, keepAll=False)
 
-    logging.debug(f'pubKeys >>>\n{pubKeys}\n<<< pubKeys')
+    logging.debug(f'pubKeys: {pubKeys.numKeys()} key(s) read from file')
 
     if pubKeys.numKeys() == 0:
         fail(f'Public key file of {userFull} does not contain any key record')
@@ -289,6 +289,6 @@ def getPublicKey(ctx, hname, user):
 
     pubKey = pubKeys.getKey(0)
 
-    logging.debug(f'Public key for {userFull}: >>>\n{pubKey}\n<<<')
+    logging.debug(f'Public key retrieved for {userFull}')
 
     return pubKey

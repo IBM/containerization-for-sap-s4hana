@@ -40,6 +40,26 @@ from modules.tools      import (
 )
 
 
+# Functions
+
+def _sanitiseConfig(cfg):
+    """ Return a deep copy of cfg with sensitive field values replaced by '<hidden>'.
+
+    Sensitive keys (exact match): password, name, host, sshid.
+    The original dict is never mutated.
+    """
+    _SENSITIVE = {'password', 'name', 'host', 'sshid'}
+
+    if isinstance(cfg, dict):
+        return {
+            k: '<hidden>' if k in _SENSITIVE else _sanitiseConfig(v)
+            for k, v in cfg.items()
+        }
+    if isinstance(cfg, list):
+        return [_sanitiseConfig(item) for item in cfg]
+    return cfg
+
+
 # Classes
 
 class _DiscoveryError(Exception):
@@ -100,15 +120,15 @@ class Config(ConfigBase):
             logging.debug(f"Using cached configuration from '{configCacheFile}'")
             self._config = configCached
 
-        logging.debug(f'self._config >>>{self._config}<<<')
+        logging.debug(f'config: {_sanitiseConfig(self._config)}')
 
     # Public methods
 
     def getFull(self):
         """ Get full configuration (inlcuding discovered parts) as nested namespace """
-        logging.debug(f'self._config >>>{self._config}<<<')
+        logging.debug(f'config: {_sanitiseConfig(self._config)}')
         cleaned = ConfigBase.cleanup(self._config)
-        logging.debug(f'cleaned >>>{cleaned}<<<')
+        logging.debug(f'cleaned: {_sanitiseConfig(cleaned)}')
         # return objToNestedNs(ConfigBase.cleanup(self._config))
         return objToNestedNs(self._config)
 
@@ -459,7 +479,7 @@ class Config(ConfigBase):
 
         # Set requested resources for containers
 
-        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+        logging.debug(f'config: {_sanitiseConfig(self._config)}')
 
         # Memory for HDB container
         #
@@ -470,7 +490,7 @@ class Config(ConfigBase):
 
         hdbMinMem  =  f'{self._discoverHdbSizeGiB()}Gi'
 
-        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+        logging.debug(f'config: {_sanitiseConfig(self._config)}')
         for kind in ('requests', 'limits'):
             res = self._config['ocp']['containers']['hdb']['resources'][kind]
             if not res['memory']:
@@ -487,7 +507,7 @@ class Config(ConfigBase):
 
         diMinMem  =  f'{self._discoverDiSizeGiB()}Gi'
 
-        logging.debug(f'config >>>{yaml.dump(self._config)}<<<')
+        logging.debug(f'config: {_sanitiseConfig(self._config)}')
         for kind in ('requests', 'limits'):
             res = self._config['ocp']['containers']['di']['resources'][kind]
             if not res['memory']:
@@ -595,15 +615,6 @@ class Config(ConfigBase):
             raise _DiscoveryError(
                 "Internal error: wrong baseType specified"
             )
-        # There exist more than on location of the global.ini
-        # They are ordered in different layers:
-        # Default
-        # System
-        # Database
-        # Host
-        # The parameters are taken from top to bottom.
-        # https://help.sap.com/viewer/6b94445c94ae495c83a19646e7c3fd56/2.0.04/en-US/3f1a6a7dc31049409e1a9f9108d73d51.html
-
         instno   = self._config['refsys']['hdb']['instno']
         hostname = self._config['refsys']['hdb']['host']['name']
         sapmnt   = self._config['refsys']['hdb']['base']['shared']
@@ -622,20 +633,9 @@ class Config(ConfigBase):
             cmd = f'grep "{basepath}[= ]" {location}/global.ini'
             result = self._cmdSshHdb.run(cmd)
             if result.rc == 0:
-                # Example for result.out
-                # basepath_datavolumes = /sapmnt/hana/data/HD1
-                # We need the basepath, which means:
-                # /sapmnt/hana
-
-                # Get first the complete path itself
                 tempPath = result.out.split('=')[1].strip()
-
-                # Then the basepath itself
                 path = '/'.join(tempPath.split('/')[:-2])
 
-        # It might happen that the path contains a SAP profile/environment variable
-        # such as $(DIR_GLOBAL). This must be replaced.
-        # The parameter value can be got from call sappfpar
         path = self._replaceSAPPfpar(sidU, path)
         if not path:
             raise _DiscoveryError(

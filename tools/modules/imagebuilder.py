@@ -286,7 +286,8 @@ class Builder():
         try:
             # pylint: disable=invalid-name, unspecified-encoding
             with open(containerfile) as fh:
-                logging.debug(f"Contents of '{containerfile}': >>>\n{fh.read()}<<<")
+                fh.read()
+                logging.debug(f"Containerfile generated at '{containerfile}'")
         except IOError:
             fail(f"Error reading from {containerfile}")
         return containerfile
@@ -447,9 +448,6 @@ class BuilderNws4(Builder):
         with pushd(dirs.build):
             self._remoteCopy.copy(f'/usr/sap/{sidU}', filterFilePath)  # also copies /sapmnt
             self._remoteCopy.copy('/usr/sap/trans', filterFilePath)
-            # SAP host agent
-            # self._remoteCopy.copy(f'/usr/sap/hostctrl', filterFilePath)
-            # self._remoteCopy.copy(f'{sapadm.home}', filterFilePath)
             self._remoteCopy.copy(f'{sidadm.home}', filterFilePath)
 
             # pylint: disable=invalid-name, unspecified-encoding
@@ -524,7 +522,6 @@ class BuilderHdb(Builder):
                            f'{dirs.build}{dirs.defaultPackagesDir}')
 
         with pushd(dirs.build):
-            # self._cmdShell.run(f"mkdir -p .{dirs.usrSapReal}")
             print(self._cmdShell.run("rsync --version").out)
             self._remoteCopy.copy(dirs.hanaSharedSid, filterFilePath, verbose=1)
             self._remoteCopy.copy('/etc/sysctl.conf', filterFilePath, verbose=1)
