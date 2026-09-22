@@ -213,7 +213,8 @@ class AuthorizedKeys():
         # Keep a backup of the original authorized_keys file on the remote side
 
         with tempfile.NamedTemporaryFile(mode='w') as akFh:
-            print(self._authKeys, file=akFh, flush=True)
+            akFh.write(str(self._authKeys) + '\n')
+            akFh.flush()
 
             source = akFh.name
             target = self._akPath

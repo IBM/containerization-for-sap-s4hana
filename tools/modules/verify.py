@@ -185,16 +185,15 @@ class Verify():
                 if secret:
                     if isSecretExisting(self._ctx):
                         if isHdbSecretValid(self._ctx):
-                            showMsgOk(f"OCP secret '{secret}' exists and is valid.")
+                            showMsgOk("OCP secret exists and is valid.")
                         else:
-                            showMsgErr(f"Mismatch between generated secret '{secret}' "
+                            showMsgErr("Mismatch between generated OCP secret "
                                        "and values specified in your credentials file.")
                             showMsgInd("Re-generate your secret by executing the tool "
                                        "'tools/ocp-hdb-secret-gen'")
                             success = False
                     else:
-                        showMsgErr(f"Specified OCP secret '{secret}' "
-                                   "was not found in OCP cluster.")
+                        showMsgErr("Specified OCP secret was not found in OCP cluster.")
                         showMsgInd("Make sure the secret exists and is "
                                    "created in the right project.")
                         success = False

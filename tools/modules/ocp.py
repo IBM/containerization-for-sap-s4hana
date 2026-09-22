@@ -228,11 +228,14 @@ class Ocp():
             ' "kubectl.kubernetes.io/last-applied-configuration")}}'
         )
 
+        # Pass secretName as a secret placeholder so it is never interpolated
+        # into the command string that is written to the log
         res = CmdShell().run(
             f'oc get secret'
             f" --namespace '{self._project}'"
-            f" --field-selector 'metadata.name={secretName}'"
-            f" -o template --template '{template}'"
+            f" --field-selector 'metadata.name=:0:'"
+            f" -o template --template '{template}'",
+            secrets=[secretName]
         )
 
         if res.rc == 0:
@@ -245,13 +248,11 @@ class Ocp():
 
             except KeyError as kex:
                 user = None
-                logging.debug(
-                    f"Could not evaluate secret data of OCP secret '{secretName}' ({kex})"
-                )
+                logging.debug(f"Could not evaluate OCP secret data ({kex})")
 
         else:
             user = None
-            logging.debug(f"Could not retrieve secret data from OCP secret '{secretName}'")
+            logging.debug("Could not retrieve OCP secret data")
 
         return user
 
@@ -278,9 +279,9 @@ class Ocp():
         res = CmdShell().run(cmd, ignoreError=ignoreError)
 
         if res.rc == 0:
-            logging.debug(f"Configuration file {file} successfully applied")
+            logging.debug("Configuration file successfully applied")
         else:
-            logging.debug(f"Error applying configuration file {file}")
+            logging.debug("Error applying configuration file")
         return res
 
     def ocDelete(self, file, printRunTime=False):
@@ -326,8 +327,9 @@ class Ocp():
         """ get the secret from OpenShift """
         res = CmdShell().run(
             f"oc get secret --namespace {self._project}"
-            f" --field-selector 'metadata.name={self._ocp.containers.di.secret}'"
-            " -o custom-columns=NAME:.metadata.name --no-headers"
+            " --field-selector 'metadata.name=:0:'"
+            " -o custom-columns=NAME:.metadata.name --no-headers",
+            secrets=[self._ocp.containers.di.secret]
         )
 
         if res.rc > 0:

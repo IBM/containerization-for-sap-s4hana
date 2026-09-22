@@ -181,7 +181,7 @@ def _addOrRemove(ctx, target, maxUserFullLen):
         # This should not happen
         fail(f"No action specified for user '{userFull}'")
 
-    logging.debug(f'authKeys >>>\n{authKeys}\n<<< authKeys')
+    logging.debug(f'authKeys: {authKeys.numKeys()} key(s)')
 
     # Write modified authorized_keys file
 

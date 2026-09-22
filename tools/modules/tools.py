@@ -191,7 +191,7 @@ def genFileFromTemplate(templatePath, outFilePath, params):
     # pylint: disable=invalid-name, unspecified-encoding
     try:
         with open(outFilePath, 'w') as fh:
-            print(content, file=fh)
+            fh.write(content)
     except IOError:
         fail(f"Error writing to file {outFilePath}")
 
