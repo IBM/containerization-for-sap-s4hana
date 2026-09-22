@@ -141,9 +141,8 @@ class CmdShell(Command):
 
         if not dryRun:
 
-            logCmd = Command._instantiateSecrets(cmd, secrets, hide=True)
-            # log cmd string if level set to info or debug
-            logging.info(f"Executing command >>>\n{logCmd}\n<<<")
+            # Log the command template (placeholders intact, no secret values)
+            logging.info(f"Executing command >>>\n{cmd}\n<<<")
 
             runCmd = Command._instantiateSecrets(cmd, secrets, hide=False)
 
@@ -153,9 +152,9 @@ class CmdShell(Command):
             err   = cProc.stderr.decode().strip()
             rcode = cProc.returncode
 
-            # log cmd string now if cmd faild and level set to error or warning
+            # log cmd string now if cmd failed and level set to error or warning
             if rcode not in rcOk and logging.getLogger().getEffectiveLevel() > 20:
-                logging.error(f"Executing command >>>\n{logCmd}\n<<<")
+                logging.error(f"Executing command >>>\n{cmd}\n<<<")
 
             result = Command.buildResult(out, err, rcode, rcOk)
 
