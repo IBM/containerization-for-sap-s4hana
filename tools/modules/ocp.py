@@ -284,6 +284,21 @@ class Ocp():
             logging.debug("Error applying configuration file")
         return res
 
+    def ocApplyContent(self, content, ignoreError=True):
+        """ Apply a configuration given as string to a resource.
+
+            The content is passed via standard input so that it never gets
+            written to disk (use this for configurations containing secrets).
+        """
+
+        res = CmdShell().run("oc apply -f -", ignoreError=ignoreError, stdin=content)
+
+        if res.rc == 0:
+            logging.debug("Configuration successfully applied")
+        else:
+            logging.debug("Error applying configuration")
+        return res
+
     def ocDelete(self, file, printRunTime=False):
         """ Delete a configuration """
 
