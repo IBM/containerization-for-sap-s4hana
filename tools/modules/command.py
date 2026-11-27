@@ -134,8 +134,11 @@ class CmdShell(Command):
         # pylint: disable=useless-super-delegation
         super().__init__()
 
-    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False, ignoreError=True):
-        """ Execute a local shell command """
+    def run(self, cmd, secrets=None, rcOk=(0,), dryRun=False, ignoreError=True, stdin=None):  # pylint: disable=too-many-arguments
+        """ Execute a local shell command
+
+            If <stdin> (str) is given it is passed to the command's standard input.
+        """
 
         result = super().run(cmd, secrets=secrets, rcOk=rcOk, dryRun=dryRun)
 
@@ -147,7 +150,8 @@ class CmdShell(Command):
             runCmd = Command._instantiateSecrets(cmd, secrets, hide=False)
 
             cProc = subprocess.run(runCmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   shell=True, check=False)
+                                   shell=True, check=False,
+                                   input=stdin.encode() if stdin is not None else None)
             out   = cProc.stdout.decode().strip()
             err   = cProc.stderr.decode().strip()
             rcode = cProc.returncode
